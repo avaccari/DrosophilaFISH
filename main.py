@@ -38,11 +38,11 @@ viewer = napari.Viewer(
     title=osp.split(filename)[1],
     ndisplay=3
 )
-layers = viewer.add_image(
+viewer.add_image(
     data,
     channel_axis=0,
     name=channels,
-    colormap="gray",
+    colormap="green",
     blending="additive",
     scale=spacing,
     depiction="volume",
@@ -50,40 +50,46 @@ layers = viewer.add_image(
     visible=False
 )
 
-# Select the nuclei's channel
-CH = 2
-ch2 = data[CH, ...]
-
 # Denoise
-print("Denoising...", end="")
-file_ch2_denoised = osp.splitext(filename)
-file_ch2_denoised = file_ch2_denoised[0] + "-den.npy"
-if osp.exists(file_ch2_denoised):
-    ch2_denoised = np.load(file_ch2_denoised)
-else:
-    ch2_denoised = ndi.median_filter(
-        ch2,
-        footprint=np.ones((3, 3 * spacing_ratio, 3 * spacing_ratio))
-    )
-    np.save(file_ch2_denoised, ch2_denoised)
+footprint_dim = ((3, 3, 3),
+                 (3, 3, 3),
+                 (3, 3, 3))
+                 # (3, 3 * spacing_ratio, 3 * spacing_ratio))
+denoised = np.empty_like(data)
+print("Denoising...")
+for ch in range(len(channels)):
+    print("- Denoising channel {}...".format(ch), end="")
+    file = osp.splitext(filename)
+    file = file[0] + "-den-{}-{}.npy".format(ch, footprint_dim[ch])
+    if osp.exists(file):
+        denoised[ch, ...] = np.load(file)
+    else:
+        denoised[ch, ...] = ndi.median_filter(
+            data[ch, ...],
+            footprint=np.ones(footprint_dim[ch])
+        )
+        np.save(file, denoised[ch, ...])
+    print("done!")
+names = [c + '-den' for c in channels]
 viewer.add_image(
-    ch2_denoised,
-    scale=spacing,
-    colormap="gray",
+    denoised,
+    channel_axis=0,
+    name=names,
+    colormap="magenta",
     blending="additive",
+    scale=spacing,
     interpolation="nearest",
     visible=False
 )
-print("done!")
 
-# Threshold
+# Threshold to identify the nuclei
 print("Thresholding...", end="")
-ch2_thresholded = ch2_denoised > ski_fil.threshold_otsu(ch2_denoised)
+NUCLEI_CH = 2
+nuclei_mask = denoised[NUCLEI_CH] > ski_fil.threshold_otsu(denoised)
 viewer.add_image(
-    ch2_thresholded,
+    nuclei_mask,
     scale=spacing,
-    opacity=0.5,
-    colormap="magenta",
+    colormap="blue",
     blending="additive",
     interpolation="nearest",
     visible=False
@@ -97,67 +103,71 @@ print("done!")
 
 # Evaluate connected components
 print("Evaluating components...")
-ch2_comp = ski_mea.label(ch2_thresholded)
-ch2_masked = ch2_denoised.copy()
-ch2_masked[ch2_thresholded == False] = 0
-ch2_comp_props = ski_mea.regionprops(
-    ch2_comp,
-    intensity_image=ch2_masked
-)
-ch2_comp_props_df = pd.DataFrame(
+nuclei_comp = ski_mea.label(nuclei_mask)
+nuclei_props_df = pd.DataFrame(
     ski_mea.regionprops_table(
-        ch2_comp,
-        intensity_image=ch2_masked,
+        nuclei_comp,
         properties=('label', 'area')
     )
 )
 
+# Evaluate and store components properties for all channels
+for ch in range(len(channels)):
+    comp_props_df = pd.DataFrame(
+        ski_mea.regionprops_table(
+            nuclei_comp,
+            intensity_image=data[ch, ...],
+            properties=('label', 'intensity_mean')
+        )
+    )
+    nuclei_props_df = nuclei_props_df.merge(comp_props_df, on='label')
+    nuclei_props_df = nuclei_props_df.rename(columns={'intensity_mean': 'intensity_mean_ch{}'.format(ch)})
 
-# Evaluate segmented volumes statistics
-ch2_min_vol, ch2_med_vol, ch2_max_vol = ch2_comp_props_df['area'].quantile([0.25, 0.5, 0.75])
-ch2_mean = ch2_comp_props_df['area'].mean()
-ch2_std = ch2_comp_props_df['area'].std()
-print(" - Volumes quantiles: {}, {}, {}".format(ch2_min_vol, ch2_med_vol, ch2_max_vol))
-ch2_med_vol = 20000  # Forcing median size by hand. TODO: find a way to evaluate based on image
-print(" - Selected volume range: {} - {}".format(0.5 * ch2_med_vol, 1.5 * ch2_med_vol))
+# Evaluate nuclei's volume statistics
+nuclei_min_vol, nuclei_med_vol, nuclei_max_vol = nuclei_props_df['area'].quantile([0.25, 0.5, 0.75])
+nuclei_mean = nuclei_props_df['area'].mean()
+nuclei_std = nuclei_props_df['area'].std()
+print(" - Volumes quantiles: {}, {}, {}".format(nuclei_min_vol, nuclei_med_vol, nuclei_max_vol))
+nuclei_med_vol = 20000  # Forcing median size by hand. TODO: find a way to evaluate based on image
+print(" - Selected volume range: {} - {}".format(0.5 * nuclei_med_vol, 1.5 * nuclei_med_vol))
 sbn.displot(
-    ch2_comp_props_df,
+    nuclei_props_df,
     x='area',
     kde=True,
     rug=True
 )
-plt.axvline(ch2_med_vol, color="red")
-plt.axvline(ch2_min_vol, color="red")
-plt.axvline(ch2_max_vol, color="red")
-plt.axvline(ch2_mean, color="green")
-plt.axvline(ch2_mean + ch2_std, color="green")
-plt.axvline(ch2_mean - ch2_std, color="green")
+plt.axvline(nuclei_med_vol, color="red")
+plt.axvline(nuclei_min_vol, color="red")
+plt.axvline(nuclei_max_vol, color="red")
+plt.axvline(nuclei_mean, color="green")
+plt.axvline(nuclei_mean + nuclei_std, color="green")
+plt.axvline(nuclei_mean - nuclei_std, color="green")
 
 plt.figure()
 sbn.boxplot(
-    ch2_comp_props_df,
+    nuclei_props_df,
     x='area',
     notch=True,
     showcaps=False
 )
 
 # Remove large and small components
-ch2_cleaned = ch2_thresholded.copy()
+nuclei_mask_cleaned = nuclei_mask.copy()
 print(" - Removing unwanted components...", end="")
-ch2_comp_props_df.loc[:, 'keep'] = False
-mask = ch2_comp_props_df.query('area > 10000 & area < 25000').index
-ch2_comp_props_df.loc[mask, 'keep'] = True
-for _, row in ch2_comp_props_df.iterrows():
-    print("{} -> {} ".format(row['label'], row['area']), end='')
+nuclei_props_df.loc[:, 'keep'] = False
+mask = nuclei_props_df.query('area > 10000 & area < 25000').index
+nuclei_props_df.loc[mask, 'keep'] = True
+for _, row in nuclei_props_df.iterrows():
+    # print("{} -> {} ".format(row['label'], row['area']), end='')
     if not row['keep']:
-        print('x', end='')
-        ch2_cleaned[ch2_comp == row['label']] = 0
-    print('')
+        # print('x', end='')
+        nuclei_mask_cleaned[nuclei_comp == row['label']] = False
+    # print('')
+
 viewer.add_image(
-    ch2_cleaned,
+    nuclei_mask_cleaned,
     scale=spacing,
-    opacity=0.5,
-    colormap="magenta",
+    colormap="blue",
     blending="additive",
     interpolation="nearest",
     visible=False
@@ -166,71 +176,51 @@ print("done!")
 
 # Label individual soma
 print("Labeling...", end="")
-ch2_labels = ski_mea.label(ch2_cleaned)
+nuclei_labels = ski_mea.label(nuclei_mask_cleaned)
 viewer.add_labels(
-    ch2_labels,
+    nuclei_labels,
     scale=spacing,
-    blending="additive"
+    blending="additive",
+    visible=False
 )
 print("done!")
 
-print("Mask all channels...", end="")
 # Mask all channels
-ch0_masked = data[0, ...].copy()
-ch0_masked[ch2_cleaned == False] = 0
-viewer.add_image(
-    ch0_masked,
-    scale=spacing,
-    colormap="green",
-    blending="additive",
-    interpolation="nearest",
-    visible=False
-)
+print("Masking...")
+masked = np.empty_like(data)
+for ch in range(len(channels)):
+    print("- Masking channel {}...".format(ch), end="")
+    masked[ch, ...] = denoised[ch, ...].copy()
+    masked[ch, nuclei_mask_cleaned == False] = 0
+    print("done!")
 
-ch1_masked = data[1, ...].copy()
-ch1_masked[ch2_cleaned == False] = 0
+names = [c + '-msk' for c in channels]
 viewer.add_image(
-    ch1_masked,
+    masked,
+    channel_axis=0,
+    name=names,
     scale=spacing,
-    colormap="magenta",
+    colormap=["green", "magenta", "gray"],
     blending="additive",
     interpolation="nearest",
     visible=False
 )
-
-ch2_masked = data[2, ...].copy()
-ch2_masked[ch2_cleaned == False] = 0
-viewer.add_image(
-    ch2_masked,
-    scale=spacing,
-    colormap="gray",
-    blending="additive",
-    interpolation="nearest",
-    visible=False
-)
-print("done!")
 
 print("Evaluate FISH...", end="")
-# For each detected nucleus evaluate total brightness in each channel
-# and store in table. TODO: individual fluorescent FISH should be detected.
-ch2_comp_props_df.loc[:, ('ch0', 'ch1')] = 0
-for idx in ch2_comp_props_df.index:
-    if ch2_comp_props_df.loc[idx, 'keep']:
-        mask = ch2_comp == ch2_comp_props_df['label'][idx]
-        ch2_comp_props_df.loc[idx, ('ch0', 'ch1')] = data[0, mask].sum(), data[1, mask].sum()
-
-# Plot ch0 vs ch1 for the different nuclei
 plt.figure()
 sbn.scatterplot(
-    ch2_comp_props_df[ch2_comp_props_df['keep']],
-    x='ch0',
-    y='ch1'
+    nuclei_props_df[nuclei_props_df['keep']],
+    x='intensity_mean_ch0',
+    y='intensity_mean_ch1',
+    size='intensity_mean_ch2',
+    hue='label'
 )
-top = max(ch2_comp_props_df['ch0'].max(), ch2_comp_props_df['ch1'].max())
+top = max(nuclei_props_df['intensity_mean_ch0'].max(), nuclei_props_df['intensity_mean_ch1'].max())
 plt.xlim((0, top))
 plt.ylim((0, top))
 plt.title(osp.split(filename)[1])
 plt.axis('square')
+plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
 print("done!")
 
 # Show
