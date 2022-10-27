@@ -15,31 +15,19 @@ import os.path as osp
 import pandas as pd
 
 
-def contrast_stretch_by_ch(data):
-    print("Contrast stretching by channel...")
-    for ch in range(data.shape[0]):
-        print("- Contrast stretching channel {}...".format(ch), end="", flush=True)
-        data[ch, ...] = ski_exp.rescale_intensity(data[ch, ...])
-        print("done!")
-    return data
-
-
-def uint16_to_uint8(data):
-    print("Converting from uint16 to uint8...", end="", flush=True)
-    converted = data // 256
-    converted = converted.astype(np.uint8)
-    print("done!")
-    return converted
-
-
 # Specify channels
 NUCLEI_CH = 0
 FISH_647_CH = 1
 FISH_568_CH = 2
+ch_dict = {
+    NUCLEI_CH: 'Nuclei',
+    FISH_647_CH: 'FISH 647',
+    FISH_568_CH: 'FISH 568'
+}
 
 # Ask user to choose a file
 filename = filedialog.askopenfilenames()[0]
-print("--- Starting new analysis ---")
+print("\n--- Starting new analysis ---")
 
 # Load image and extract data
 print("Loading file {}...".format(filename), end="", flush=True)
@@ -61,13 +49,32 @@ print("- Data range: {}".format(contrast))
 print("- Channels: {}".format(channels))
 
 # --- Development only: shrink data ---
-dds = [np.floor(d//5).astype('uint16') for d in data.shape]
-dde = [np.ceil(d - d//5).astype('uint16') for d in data.shape]
-data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
+# dds = [np.floor(d//5).astype('uint16') for d in data.shape]
+# dde = [np.ceil(d - d//5).astype('uint16') for d in data.shape]
+# data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
 # -------------------------------------
 
-# Stretch each channel
-data = contrast_stretch_by_ch(data)
+
+def contrast_stretch(data):
+    print("Contrast stretching...", end="", flush=True)
+    data = ski_exp.rescale_intensity(data)
+    print("done!")
+    return data
+
+
+# Contrast stretch and convert each channel
+for ch in range(data.shape[0]):
+    print("Processing channel {}...".format(ch))
+    data[ch, ...] = contrast_stretch(data[ch, ...])
+
+
+def uint16_to_uint8(data):
+    print("Converting from uint16 to uint8...", end="", flush=True)
+    converted = data // 256
+    converted = converted.astype(np.uint8)
+    print("done!")
+    return converted
+
 
 # If needed, convert to uint8
 if data.dtype != 'uint8':
@@ -90,41 +97,70 @@ viewer.add_image(
     visible=False
 )
 
-# Denoise
-footprint_dim = [(3, 3, 3),
-                 (3, 3, 3),
-                 (3, 3, 3)]
-footprint_dim[NUCLEI_CH] = (3, 3 * spacing_ratio, 3 * spacing_ratio)
-denoised = np.empty_like(data)
-print("Denoising...")
-for ch in range(len(channels)):
-    print("- Denoising channel {}...".format(ch), end="", flush=True)
-    file = osp.splitext(filename)
-    file = file[0] + \
-        "-{}-den-{}-{}.npy".format(data.shape, ch, footprint_dim[ch])
-    if osp.exists(file):
-        den_ch = np.load(file)
+
+def denoise(data, footprint=None, filename_root=None, ch_id=None, stretch=True):
+    denoised = data.copy()
+
+    if footprint is None:
+        footprint = ski_mor.ball(1)
+        footprint_dim = footprint.shape
     else:
-        den_ch = sci_ndi.median_filter(
-            data[ch, ...],
+        footprint_dim = footprint.shape
+
+    print("Applying median filter...", end="", flush=True)
+    if filename_root is None:
+        denoised = sci_ndi.median_filter(
+            data,
             mode='constant',
-            footprint=np.ones(footprint_dim[ch])
+            footprint=footprint
         )
-        np.save(file, den_ch)
-    denoised[ch, ...] = den_ch
+    else:
+        if ch_id is None:
+            print(
+                "WARNING: a ch_id should be provided to identify the channel. The data was not denoised.")
+        else:
+            file = osp.splitext(filename_root)
+            file = file[0] + \
+                "-{}-{}-den-{}.npy".format(ch_id, data.shape, footprint_dim)
+            try:
+                denoised = np.load(file)
+            except OSError:
+                denoised = sci_ndi.median_filter(
+                    data,
+                    mode='constant',
+                    footprint=footprint
+                )
+                try:
+                    np.save(file, denoised)
+                except:
+                    print("WARNING: error saving the file.")
     print("done!")
-denoised = contrast_stretch_by_ch(denoised)
-names = [c + '-den' for c in channels]
+
+    if stretch:
+        denoised = contrast_stretch(denoised)
+
+    return denoised
+
+
+# Denoise nuclei channel
+nuclei_den = denoise(
+    data[NUCLEI_CH, ...],
+    footprint=ski_mor.ball(7)[3::4, ...],
+    filename_root=filename,
+    ch_id=ch_dict[NUCLEI_CH],
+    stretch=True
+)
 viewer.add_image(
-    denoised,
-    channel_axis=0,
-    name=names,
+    nuclei_den,
+    name='Nuclei den',
     colormap="magenta",
     blending="additive",
     scale=spacing,
     interpolation="nearest",
     visible=False
 )
+
+napari.run()
 
 # --- Identify and segment the individual nuclei ---
 # Threshold to identify the nuclei
