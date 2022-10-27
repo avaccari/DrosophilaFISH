@@ -15,124 +15,59 @@ import os.path as osp
 import pandas as pd
 
 
-def contrast_stretch_by_ch(data):
-    print("Contrast stretching by channel...")
-    for ch in range(data.shape[0]):
-        print("- Contrast stretching channel {}...".format(ch), end="", flush=True)
-        data[ch, ...] = ski_exp.rescale_intensity(data[ch, ...])
-        print("done!")
-    return data
-
-
-def uint16_to_uint8(data):
-    print("Converting from uint16 to uint8...", end="", flush=True)
-    converted = data // 256
-    converted = converted.astype(np.uint8)
-    print("done!")
-    return converted
-
-
 class Channel:
-    """
-    The Channel
-
-    This class represents each of the image channels
-    """
     # A counter for the channels
-    channel_number = 0
+    _channel_number = 0
 
-    def __init__(self, data, voxel_size=(1, 1, 1), name=None):
-        """
-        Channel
+    # A static method to contrast stretch
+    def contrast_stretch(data):
+        return ski_exp.rescale_intensity(data)
 
-        Initializes a channel.
-
-        Parameters
-        ----------
-        data : ndarray
-            Channel data. 
-            The axis are expected in the Z, Y, X order.
-        voxel_size : tuple, optional
-            Physical size of each voxel in the (Z, Y, X) order, by default 
-            (1, 1, 1)
-        name : str, optional
-            Name of the channel.
-            If `None`, the name will be "Channel" followed by an increasing 
-            number.
-        """
+    def __init__(self, data, voxel_size=(1, 1, 1), name=None, contrast_stretch=True, convert_to_uint8=True):
         self.data = data
         self.voxel_size = voxel_size
         self._z_ratio = int(np.ceil(voxel_size[0] / voxel_size[1]))
         if name is None:
             self.name = 'Channel' + str(Channel.channel_number)
-        Channel.channel_number += 1
+        else:
+            self.name = name
+        self._channel_number = Channel._channel_number
+        Channel._channel_number += 1
 
-    def contrast_stretch(self):
-        """
-        Perform in-place data contrast stretching
+        if contrast_stretch:
+            print("Contrast stretching channel {}...".format(
+                self.name), end="", flush=True)
+            self.data = Channel.contrast_stretch(self.data)
+            print("done!")
 
-        This function replaces the current channel data with the contrast 
-        stretched version. 
-        The conversion is done in-place so the original data is overwritten.
-        """
-        print("- Contrast stretching channel {}...".format(self.name),
-              end="", flush=True)
-        self.data = ski_exp.rescale_intensity(self.data)
-        print("done!")
+        if convert_to_uint8:
+            if self.data.dtype == 'uint8':
+                print("\nData already in `uint8` format. Conversion skipped.")
+            else:
+                if self.data.dtype != 'uint16':
+                    print(
+                        "\nWARNING: Conversion from types other than 'uint16' not implemented!")
+                else:
+                    print("Converting from uint16 to uint8 channel {}...".format(
+                        self.name), end="", flush=True)
+                    self.data = (self.data // 256).astype('uint8')
+                    print("done!")
 
-    def to_uint8(self):
-        """
-        Perform in-place conversion to uint8 (assumes type uint16)
+        self.original = self.data.copy()
 
-        This function scales the data by dividing (integer division) by 256.
-        After that, it forces the type of the data to 'uint8'.
-        The conversion is done in-place so the origina data is overwritten.
-        """
-        if self.data.dtype != 'uint16':
-            print("WARNING: conversion from types other than 'uint16' not implemented!")
-            return
-        print("Converting from uint16 to uint8...", end="", flush=True)
-        self.data = (self.data // 256).astype('uint8')
-        print("done!")
-
-    def median_filter(self, footprint=None, file_root=None):
+    def median_filter(self, footprint=None, file_root=None, contrast_stretch=True):
         # TODO: Should the intensities of the different slices be equalized due
         # to the fact that at higher Zs, we are deeper in the tissue? If so,
         # should we use regions without signal and just noise? Should we also
         # equalize across channels?
-        """
-        Apply a median filter to the channel
-
-        A median filter is applied to denoise the channel. If `footprint` is 
-        specified, it is used with the median filter, otherwise a fooprint with
-        dimensions `(3, 3 * z_ratio, 3 * z_ratio)` is used where `z_ratio` is
-        the ratio of the physical size of the voxels between the Z dimension 
-        and the X and Y dimensions.
-
-        Parameters
-        ----------
-        footprint : ndarray, optional
-            The footprint to use with the median filter, by default None
-        file_root : str, optional
-            The root name for the file that contains the denoised channel. If 
-            not `None` the filtered version of the channel is loaded from a file
-            named `file_root-{channel name}-{channel shape}-den-{footprint dimensions}.npy`.
-            If the file does not exist, the channel is filtered and the result
-            is stored in a file with the same name.
-
-        Returns
-        -------
-        ndarray (same size of the channel data)
-            The filtered version of the channel
-        """
         if footprint is None:
             footprint_dim = (3, 3 * self._z_ratio, 3 * self._z_ratio)
             footprint = np.ones(footprint_dim)
         else:
             footprint_dim = footprint.shape
 
-        print("Start: applying median filter to channel {}...".format(
-            self.name))
+        print("Applying median filter to channel {}...".format(
+            self.name), end="", flush=True)
 
         if file_root is not None:
             file = osp.splitext(file_root)
@@ -145,135 +80,130 @@ class Channel:
                 filtered = np.load(file)
             except OSError:
                 filtered = sci_ndi.median_filter(
-                    data[ch, ...],
+                    self.data,
                     mode='constant',
                     footprint=footprint
                 )
                 try:
                     np.save(file, filtered)
                 except:
-                    print("The file {} couldn't be saved!".format(file))
+                    print("\n\nWARNING: The file {} couldn't be saved!\n".format(file))
         else:
             filtered = sci_ndi.median_filter(
-                data[ch, ...],
+                self.data,
                 mode='constant',
                 footprint=footprint
             )
 
-        print("Finish: applying median filter to channel {}...".format(
-            self.name))
+        print("done!")
+
+        if contrast_stretch:
+            print("Contrast stretching...", end="", flush=True)
+            filtered = Channel.contrast_stretch(filtered)
+            print("done!")
+
         return filtered
 
 
 class Image:
-    def __init__(self, filename=None):
+    def __init__(self, filename=None, channel_names=None, contrast_stretch=True, convert_to_uint8=True):
         self.channels = []
 
         if filename is None:
             filename = filedialog.askopenfilenames()[0]
 
-        print("--- Starting new analysis ---")
+        print("\n\n--- Starting new analysis ---")
 
         print("Loading file {}...".format(filename), end="", flush=True)
         original = AICSImage(filename)
+        data = original.get_image_data("CZYX")
         print("done!")
 
-        pass
+        self.channels_no = data.shape[0]
+        self.original_dtype = data.dtype
 
+        pixel_sizes = original.physical_pixel_sizes
+        spacing = (pixel_sizes.Z, pixel_sizes.Y, pixel_sizes.X)
+        spacing_ratio = int(np.ceil(spacing[0] / spacing[1]))
+        contrast = [np.min(data), np.max(data)]
+        channels = original.channel_names
+        print("Original data info:")
+        print("- Image shape (CH, Z, Y, X): {}".format(data.shape))
+        print("- Pixel sizes (Z, Y, X): {}".format(spacing))
+        print("  - Spacing ratio (Z / X, Y): {}".format(spacing_ratio))
+        print("- Data type: {}".format(original.dtype))
+        print("- Data range: {}".format(contrast))
+        print("- Original channels names: {}".format(channels))
+
+        if len(channels) != len(channel_names):
+            print("\nWARNING: the provided channels name list doesn't match the lenght of the channels in the image. Using original names.")
+        else:
+            channels = channel_names
+            print("- assigned channels names: {}".format(channels))
+
+        print("Parsing channels...")
+        for ch in range(self.channels_no):
+            self.channels.append(
+                Channel(
+                    data[ch, ...],
+                    voxel_size=spacing,
+                    name=channels[ch],
+                    contrast_stretch=contrast_stretch,
+                    convert_to_uint8=convert_to_uint8
+                )
+            )
+        print("done!")
+
+
+file = '/Volumes/GoogleDrive-104915504535925824452/Shared drives/MarkD/FISH analysis/FISH dataset (2x exp, 16 bit) Oct 2022/48h_GFP_dpr13-568_dpr17-647v_1(2x_16bit)_6.czi'
+channel_names = ('Nuclei', 'Fish_647', 'Fish_568')
+image = Image(file, channel_names=channel_names)
 
 # Specify channels
 NUCLEI_CH = 0
 FISH_647_CH = 1
 FISH_568_CH = 2
 
-# Ask user to choose a file
-filename = filedialog.askopenfilenames()[0]
-print("--- Starting new analysis ---")
-
-# Load image and extract data
-print("Loading file {}...".format(filename), end="", flush=True)
-original = AICSImage(filename)
-data = original.get_image_data("CZYX")
-print("done!")
-
-pixel_sizes = original.physical_pixel_sizes
-spacing = (pixel_sizes.Z, pixel_sizes.Y, pixel_sizes.X)
-spacing_ratio = int(np.ceil(spacing[0] / spacing[1]))
-contrast = [np.min(data), np.max(data)]
-channels = original.channel_names
-print("Original data info:")
-print("- Image shape (CH, Z, Y, X): {}".format(data.shape))
-print("- Pixel sizes (Z, Y, X): {}".format(spacing))
-print("  - Spacing ratio (Z / X, Y): {}".format(spacing_ratio))
-print("- Data type: {}".format(original.dtype))
-print("- Data range: {}".format(contrast))
-print("- Channels: {}".format(channels))
-
 # --- Development only: shrink data ---
-dds = [np.floor(d//5).astype('uint16') for d in data.shape]
-dde = [np.ceil(d - d//5).astype('uint16') for d in data.shape]
-data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
+# dds = [np.floor(d//5).astype('uint16') for d in data.shape]
+# dde = [np.ceil(d - d//5).astype('uint16') for d in data.shape]
+# data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
 # -------------------------------------
 
-# Stretch each channel
-data = contrast_stretch_by_ch(data)
-
-# If needed, convert to uint8
-if data.dtype != 'uint8':
-    data = uint16_to_uint8(data)
 
 # Show original data
+print("Adding original images to viewer...", end="", flush=True)
 viewer = napari.Viewer(
-    title=osp.split(filename)[1],
+    title=osp.split(file)[1],
     ndisplay=3
 )
+for ch in range(image.channels_no):
+    viewer.add_image(
+        image.channels[ch].data,
+        name=image.channels[ch].name,
+        colormap="green",
+        blending="additive",
+        scale=image.channels[ch].voxel_size,
+        depiction="volume",
+        interpolation="nearest",
+        visible=False
+    )
+print("done!")
+
+# Denoise and stretch the nuclei channel
+filtered = image.channels[NUCLEI_CH].median_filter(file_root=file)
 viewer.add_image(
-    data,
-    channel_axis=0,
-    name=channels,
-    colormap="green",
+    filtered,
+    name=image.channels[NUCLEI_CH].name + "-den",
+    colormap="magenta",
     blending="additive",
-    scale=spacing,
-    depiction="volume",
+    scale=image.channels[NUCLEI_CH].voxel_size,
     interpolation="nearest",
     visible=False
 )
 
-# Denoise
-footprint_dim = [(3, 3, 3),
-                 (3, 3, 3),
-                 (3, 3, 3)]
-footprint_dim[NUCLEI_CH] = (3, 3 * spacing_ratio, 3 * spacing_ratio)
-denoised = np.empty_like(data)
-print("Denoising...")
-for ch in range(len(channels)):
-    print("- Denoising channel {}...".format(ch), end="", flush=True)
-    file = osp.splitext(filename)
-    file = file[0] + \
-        "-{}-den-{}-{}.npy".format(data.shape, ch, footprint_dim[ch])
-    if osp.exists(file):
-        den_ch = np.load(file)
-    else:
-        den_ch = sci_ndi.median_filter(
-            data[ch, ...],
-            mode='constant',
-            footprint=np.ones(footprint_dim[ch])
-        )
-        np.save(file, den_ch)
-    denoised[ch, ...] = den_ch
-    print("done!")
-denoised = contrast_stretch_by_ch(denoised)
-names = [c + '-den' for c in channels]
-viewer.add_image(
-    denoised,
-    channel_axis=0,
-    name=names,
-    colormap="magenta",
-    blending="additive",
-    scale=spacing,
-    interpolation="nearest",
-    visible=False
-)
+napari.run()
+
 
 # --- Identify and segment the individual nuclei ---
 # Threshold to identify the nuclei
