@@ -21,8 +21,8 @@ FISH_647_CH = 1
 FISH_568_CH = 2
 ch_dict = {
     NUCLEI_CH: 'Nuclei',
-    FISH_647_CH: 'FISH 647',
-    FISH_568_CH: 'FISH 568'
+    FISH_647_CH: 'FISH_647',
+    FISH_568_CH: 'FISH_568'
 }
 
 # Ask user to choose a file
@@ -64,7 +64,7 @@ def contrast_stretch(data):
 
 # Contrast stretch and convert each channel
 for ch in range(data.shape[0]):
-    print("Processing channel {}...".format(ch))
+    print("Processing channel {}...".format(ch_dict[ch]))
     data[ch, ...] = contrast_stretch(data[ch, ...])
 
 
@@ -88,7 +88,7 @@ viewer = napari.Viewer(
 viewer.add_image(
     data,
     channel_axis=0,
-    name=channels,
+    name=ch_dict.values(),
     colormap="green",
     blending="additive",
     scale=spacing,
@@ -143,6 +143,7 @@ def denoise(data, footprint=None, filename_root=None, ch_id=None, stretch=True):
 
 
 # Denoise nuclei channel
+print("Denoising nuclei's channel...")
 nuclei_den = denoise(
     data[NUCLEI_CH, ...],
     footprint=ski_mor.ball(7)[3::4, ...],
@@ -152,7 +153,7 @@ nuclei_den = denoise(
 )
 viewer.add_image(
     nuclei_den,
-    name='Nuclei den',
+    name=ch_dict[NUCLEI_CH] + '-den',
     colormap="magenta",
     blending="additive",
     scale=spacing,
@@ -160,14 +161,12 @@ viewer.add_image(
     visible=False
 )
 
-napari.run()
-
-# --- Identify and segment the individual nuclei ---
-# Threshold to identify the nuclei
+# Threshold denoised nuclei channel
 print("Thresholding nuclei...", end="", flush=True)
-nuclei_mask = denoised[NUCLEI_CH] > ski_fil.threshold_otsu(denoised[NUCLEI_CH])
+nuclei_mask = nuclei_den > ski_fil.threshold_otsu(nuclei_den)
 viewer.add_image(
     nuclei_mask,
+    name=ch_dict[NUCLEI_CH] + '-msk',
     opacity=0.5,
     scale=spacing,
     colormap="blue",
@@ -176,6 +175,194 @@ viewer.add_image(
     visible=False
 )
 print("done!")
+
+
+def detect_blobs(data, min_sigma=1, max_sigma=50, num_sigma=10, threshold=0.01, filename_root=None, ch_id=None):
+    # TODO: might be good to use a range of sigmas
+    #       Requires more memory or some cropping before analysis
+    blobs_ctrs = np.zeros((1, 3))
+    print("Detecting blobs' centers...", end="", flush=True)
+    if filename_root is None:
+        blobs_ctrs = ski_fea.blob_log(
+            data,
+            min_sigma=min_sigma * np.array((1 / spacing_ratio, 1, 1)),
+            max_sigma=max_sigma * np.array((1 / spacing_ratio, 1, 1)),
+            num_sigma=num_sigma,
+            threshold=threshold,
+            exclude_border=True
+        )
+    else:
+        if ch_id is None:
+            print(
+                "WARNING: a ch_id should be provided to identify the channel. Blobs were not detected.")
+        else:
+            file = osp.splitext(filename_root)
+            file = file[0] + \
+                "-{}-{}-blb.npy".format(ch_id, data.shape)
+            try:
+                blobs_ctrs = np.load(file)
+            except OSError:
+                blobs_ctrs = ski_fea.blob_log(
+                    data,
+                    min_sigma=min_sigma * np.array((1 / spacing_ratio, 1, 1)),
+                    max_sigma=max_sigma * np.array((1 / spacing_ratio, 1, 1)),
+                    num_sigma=num_sigma,
+                    threshold=threshold,
+                    exclude_border=True
+                )
+                try:
+                    np.save(file, blobs_ctrs)
+                except:
+                    print("WARNING: error saving the file.")
+    print("done!")
+
+    return blobs_ctrs
+
+
+print("Detecting nuclei's centers...")
+nuclei_ctrs = detect_blobs(
+    data[NUCLEI_CH],
+    min_sigma=20,
+    max_sigma=20,
+    num_sigma=1,
+    threshold=0.01,
+    filename_root=filename,
+    ch_id=ch_dict[NUCLEI_CH]
+)
+
+print(nuclei_ctrs)
+
+viewer.add_points(
+    nuclei_ctrs[:, :3],
+    name=ch_dict[NUCLEI_CH] + '-ctrs',
+    size=5,
+    symbol='disc',
+    opacity=1,
+    scale=spacing,
+    edge_color='green',
+    face_color='green',
+    blending="additive",
+    out_of_slice_display=True,
+    visible=False
+)
+print("done!")
+
+# Find the equivalent to Voronoi regions based on detected nuclei's centers
+# Coordinates are normalized to the physical size before evaluating the regions
+print("Identifying Voronoi regions within nuclei's mask...", end="", flush=True)
+nuclei_ctrs_tree = sci_spa.KDTree(nuclei_ctrs[:, :3] * (spacing_ratio, 1, 1))
+nuclei_mask_idx = nuclei_mask.nonzero()
+nuclei_mask_idx_array = np.vstack(nuclei_mask_idx).T
+closest_nucleus = nuclei_ctrs_tree.query(
+    nuclei_mask_idx_array * (spacing_ratio, 1, 1)
+)
+nuclei_labels_voronoi = np.zeros_like(data[NUCLEI_CH])
+# The +1 is to start the labels at 1 instead of 0
+nuclei_labels_voronoi[nuclei_mask_idx[0],
+                      nuclei_mask_idx[1],
+                      nuclei_mask_idx[2]] = closest_nucleus[1] + 1
+viewer.add_labels(
+    nuclei_labels_voronoi,
+    name=ch_dict[NUCLEI_CH] + '-lbls',
+    scale=spacing,
+    blending="additive",
+    visible=False
+)
+print("done!")
+
+# Evaluate potential nuclei properties
+print("Evaluating potential nuclei properties...")
+nuclei_props_df = pd.DataFrame(
+    ski_mea.regionprops_table(
+        nuclei_labels_voronoi,
+        properties=('label',
+                    'area',
+                    'axis_major_length',
+                    'axis_minor_length',
+                    'equivalent_diameter_area',
+                    'slice',
+                    'solidity')
+    )
+)
+
+nuclei_props_df.loc[:, 'keep'] = True  # Keep all for now
+
+print(nuclei_props_df)
+
+print("done!")
+
+# --- Identify FISH puncta in the other channels ---
+# -- Identify the 568 FISH signals --
+print("Identifying potential 568nm channel puncta's centers within nuclei's bboxes...")
+detections_dfs = []
+for i, row in nuclei_props_df[nuclei_props_df['keep']].iterrows():
+    print('{}/{}'.format(i, len(nuclei_props_df)))
+    sl = row['slice']
+    # Find location withing the bbox and shift coordinates
+    ctrs = detect_blobs(
+        data[FISH_568_CH, sl[0], sl[1], sl[2]],
+        min_sigma=1,
+        max_sigma=21,
+        num_sigma=42,
+        threshold=0.15,
+    ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
+    detections_dfs.append(
+        pd.DataFrame(
+            ctrs,
+            columns=['Z', 'Y', 'X', 'sigma_Z', 'sigma_Y', 'sigma_X']
+        )
+    )
+fish_568_puncta_ctrs_df = pd.concat(detections_dfs)
+fish_568_puncta_ctrs_df.loc[:, 'label'] = range(len(fish_568_puncta_ctrs_df))
+print("{} detected".format(len(fish_568_puncta_ctrs_df)))
+print("sigmas:\n", fish_568_puncta_ctrs_df[[
+      'sigma_Z', 'sigma_Y', 'sigma_X']].describe())
+print("done!")
+
+# Select 568 FISH signatures within nuclei
+print("Assigning 568nm puncta to nuclei...", end="", flush=True)
+fish_568_puncta_ctrs_df.loc[:, ['keep', 'nucleus']] = False, None
+nuclei_props_df.loc[:, channels[FISH_568_CH] + '_cnt'] = 0
+nuclei_props_df[channels[FISH_568_CH] + '_ids'] = [[]
+                                                   for _ in range(len(nuclei_props_df))]
+for _, row in fish_568_puncta_ctrs_df.iterrows():
+    coo = row[['Z', 'Y', 'X']].astype('uint16')
+    label = nuclei_labels_voronoi[coo[0], coo[1], coo[2]]
+    if label != 0:
+        nuclei_props_df.loc[
+            nuclei_props_df['label'] == label,
+            channels[FISH_568_CH] + '_cnt'
+        ] += 1
+        nuclei_props_df.loc[
+            nuclei_props_df['label'] == label,
+            channels[FISH_568_CH] + '_ids'
+        ].values[0].append(row['label'])
+        fish_568_puncta_ctrs_df.loc[
+            fish_568_puncta_ctrs_df['label'] == row['label'],
+            ['keep', 'nucleus']
+        ] = True, label
+
+# Create a point layer with only the 568 puncta within nuclei
+viewer.add_points(
+    fish_568_puncta_ctrs_df.loc[
+        fish_568_puncta_ctrs_df['keep'],
+        ['Z', 'Y', 'X']
+    ].to_numpy(),
+    name=ch_dict[FISH_568_CH] + '-puncta',
+    size=5,
+    symbol='disc',
+    opacity=0.2,
+    scale=spacing,
+    edge_color='red',
+    face_color='red',
+    blending="additive",
+    out_of_slice_display=True,
+    visible=False
+)
+print("done!")
+
+napari.run()
+
 
 # Bounding surfaces for thresholded nuclei
 print("Evaluating thresholded nuclei's boundaries...", end="", flush=True)
@@ -211,24 +398,6 @@ print("done!")
 #         help identify inside and boundaries. Also check the libraries that are available in Python to extract features
 #         "Deep learning meets radiomics for end-to-end brain tumor mri analysis" (W. Ponikiewski)
 #       - Check ICIP2022 paper #1147 (and the following on in the panel - Greek guy)
-
-# Evaluate connected components
-print("Evaluating nuclei connected components...")
-nuclei_comp = ski_mea.label(nuclei_mask)
-nuclei_props_df = pd.DataFrame(
-    ski_mea.regionprops_table(
-        nuclei_comp,
-        properties=('label',
-                    'area',
-                    'axis_major_length',
-                    'axis_minor_length',
-                    'bbox',
-                    'equivalent_diameter_area',
-                    'slice',
-                    'solidity')
-    )
-)
-
 #
 # # Evaluate and store image properties based on nuclei components
 # for ch in range(len(channels)):
@@ -356,126 +525,6 @@ print("done!")
 ################################################################################
 
 
-# Use LOG to detect location of nuclei
-print("Detecting nuclei centers...", end="", flush=True)
-nuclei_ctrs = ski_fea.blob_log(
-    data[NUCLEI_CH],
-    min_sigma=20 * np.array((1 / spacing_ratio, 1, 1)),
-    max_sigma=20 * np.array((1 / spacing_ratio, 1, 1)),
-    num_sigma=1,
-    threshold=0.05,
-    exclude_border=True
-)
-
-print(nuclei_ctrs)
-
-viewer.add_points(
-    nuclei_ctrs[:, :3],
-    name='nuclei_centers',
-    size=5,
-    symbol='disc',
-    opacity=1,
-    scale=spacing,
-    edge_color='green',
-    face_color='green',
-    blending="additive",
-    out_of_slice_display=True,
-    visible=False
-)
-print("done!")
-
-
-# Find the equivalent to Voronoi regions based on detected nuclei's centers
-# Coordinates are normalized to the physical size before evaluating the regions
-print("Identifying Voronoi regions...", end="", flush=True)
-nuclei_ctrs_tree = sci_spa.KDTree(nuclei_ctrs[:, :3] * (spacing_ratio, 1, 1))
-nuclei_mask_idx = nuclei_mask.nonzero()
-nuclei_mask_idx_array = np.vstack(nuclei_mask_idx).T
-closest_nucleus = nuclei_ctrs_tree.query(
-    nuclei_mask_idx_array * (spacing_ratio, 1, 1))
-nuclei_labels_voronoi = np.zeros_like(data[NUCLEI_CH])
-nuclei_labels_voronoi[nuclei_mask_idx[0], nuclei_mask_idx[1],
-                      nuclei_mask_idx[2]] = closest_nucleus[1] + 1
-viewer.add_labels(
-    nuclei_labels_voronoi,
-    scale=spacing,
-    blending="additive",
-    visible=False
-)
-print("done!")
-
-
-plt.show()
-napari.run()
-
-
-# --- Identify FISH puncta in the other channels ---
-# -- Identify the 568 FISH signals --
-# TODO: save the detected puncta to file, maybe the dataframes
-print("Identifying 568nm channel puncta...", end="", flush=True)
-fish_568_puncta = ski_fea.blob_log(
-    data[FISH_568_CH],
-    min_sigma=4 * np.array((1 / spacing_ratio, 1, 1)),
-    max_sigma=7 * np.array((1 / spacing_ratio, 1, 1)),
-    num_sigma=10,
-    threshold=0.01,
-    exclude_border=True
-)
-fish_568_puncta_df = pd.DataFrame(
-    fish_568_puncta, columns=['Z', 'Y', 'X', 'sigma'])
-fish_568_puncta_df.loc[:, 'label'] = range(fish_568_puncta_df.shape[0])
-print("{} detected".format(len(fish_568_puncta)))
-print("sigmas:\n", fish_568_puncta_df['sigma'].describe())
-viewer.add_points(
-    fish_568_puncta[:, :3],
-    name='fish_568_puncta',
-    size=5,
-    symbol='disc',
-    opacity=0.2,
-    scale=spacing,
-    edge_color='red',
-    face_color='red',
-    blending="additive",
-    out_of_slice_display=True,
-    visible=False
-)
-print("done!")
-
-
-# Select 568 FISH signatures within nuclei
-print("Assigning 568nm puncta to nuclei...", end="", flush=True)
-fish_568_puncta_df.loc[:, ['keep', 'nucleus']] = False, None
-nuclei_props_df.loc[:, channels[FISH_568_CH] + '_cnt'] = 0
-nuclei_props_df[channels[FISH_568_CH] + '_ids'] = [[]
-                                                   for _ in range(nuclei_props_df.shape[0])]
-for _, row in fish_568_puncta_df.iterrows():
-    coo = row[['Z', 'Y', 'X']].astype('uint16')
-    label = nuclei_labels[coo[0], coo[1], coo[2]]
-    if label != 0:
-        nuclei_props_df.loc[nuclei_props_df['label'] ==
-                            label, channels[FISH_568_CH] + '_cnt'] += 1
-        nuclei_props_df.loc[nuclei_props_df['label'] == label,
-                            channels[FISH_568_CH] + '_ids'].values[0].append(row['label'])
-        fish_568_puncta_df.loc[fish_568_puncta_df['label']
-                               == row['label'], ['keep', 'nucleus']] = True, label
-print("done!")
-
-# Create a point layer with only the 568 puncta within nuclei
-fish_568_puncta_masked = fish_568_puncta_df.loc[fish_568_puncta_df['keep'], [
-    'Z', 'Y', 'X']].to_numpy()
-viewer.add_points(
-    fish_568_puncta_masked,
-    size=5,
-    symbol='disc',
-    opacity=0.2,
-    scale=spacing,
-    edge_color='red',
-    face_color='red',
-    blending="additive",
-    out_of_slice_display=True,
-    visible=False
-)
-
 # -- Identify the 647 FISH signals --
 print("Identifying 647nm channel puncta...", end="", flush=True)
 fish_647_puncta = ski_fea.blob_log(
@@ -558,7 +607,7 @@ plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
 print("Saving the nuclei's and puncta property dataframe...", end="", flush=True)
 file = osp.splitext(filename)
 nuclei_props_df.to_json(file[0] + "-{}-nuclei_df.json".format(data.shape))
-fish_568_puncta_df.to_json(file[0] + "-{}-568_df.json".format(data.shape))
+fish_568_puncta_ctrs_df.to_json(file[0] + "-{}-568_df.json".format(data.shape))
 fish_647_puncta_df.to_json(file[0] + "-{}-647_df.json".format(data.shape))
 print("done!")
 
