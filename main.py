@@ -15,57 +15,11 @@ import os.path as osp
 import pandas as pd
 
 
-# Specify channels
-NUCLEI_CH = 0
-FISH_647_CH = 1
-FISH_568_CH = 2
-ch_dict = {
-    NUCLEI_CH: 'Nuclei',
-    FISH_647_CH: 'FISH_647',
-    FISH_568_CH: 'FISH_568'
-}
-
-# Ask user to choose a file
-filename = filedialog.askopenfilenames()[0]
-print("\n--- Starting new analysis ---")
-
-# Load image and extract data
-print("Loading file {}...".format(filename), end="", flush=True)
-original = AICSImage(filename)
-data = original.get_image_data("CZYX")
-print("done!")
-
-pixel_sizes = original.physical_pixel_sizes
-spacing = (pixel_sizes.Z, pixel_sizes.Y, pixel_sizes.X)
-spacing_ratio = int(np.ceil(spacing[0] / spacing[1]))
-contrast = [np.min(data), np.max(data)]
-channels = original.channel_names
-print("Original data info:")
-print("- Image shape (CH, Z, Y, X): {}".format(data.shape))
-print("- Pixel sizes (Z, Y, X): {}".format(spacing))
-print("  - Spacing ratio (Z / X, Y): {}".format(spacing_ratio))
-print("- Data type: {}".format(original.dtype))
-print("- Data range: {}".format(contrast))
-print("- Channels: {}".format(channels))
-
-# --- Development only: shrink data ---
-# dds = [np.floor(d//5).astype('uint16') for d in data.shape]
-# dde = [np.ceil(d - d//5).astype('uint16') for d in data.shape]
-# data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
-# -------------------------------------
-
-
 def contrast_stretch(data):
     print("Contrast stretching...", end="", flush=True)
     data = ski_exp.rescale_intensity(data)
     print("done!")
     return data
-
-
-# Contrast stretch and convert each channel
-for ch in range(data.shape[0]):
-    print("Processing channel {}...".format(ch_dict[ch]))
-    data[ch, ...] = contrast_stretch(data[ch, ...])
 
 
 def uint16_to_uint8(data):
@@ -76,30 +30,13 @@ def uint16_to_uint8(data):
     return converted
 
 
-# If needed, convert to uint8
-if data.dtype != 'uint8':
-    data = uint16_to_uint8(data)
-
-# Show original data
-viewer = napari.Viewer(
-    title=osp.split(filename)[1],
-    ndisplay=3
-)
-viewer.add_image(
-    data,
-    channel_axis=0,
-    name=ch_dict.values(),
-    colormap="green",
-    blending="additive",
-    scale=spacing,
-    depiction="volume",
-    interpolation="nearest",
-    visible=False
-)
-
-
-def denoise(data, footprint=None, filename_root=None, ch_id=None, stretch=True):
+def denoise(data, type='median', footprint=None, sigma=(2, 10, 10), mode='constant', filename_root=None, ch_id=None, stretch=False):
     denoised = data.copy()
+
+    if type not in ['median', 'gaussian']:
+        print(
+            "WARNING: the specified mode is not available."
+        )
 
     if footprint is None:
         footprint = ski_mor.ball(1)
@@ -107,29 +44,51 @@ def denoise(data, footprint=None, filename_root=None, ch_id=None, stretch=True):
     else:
         footprint_dim = footprint.shape
 
-    print("Applying median filter...", end="", flush=True)
+    print("Applying {} filter...".format(type), end="", flush=True)
+
     if filename_root is None:
-        denoised = sci_ndi.median_filter(
-            data,
-            mode='constant',
-            footprint=footprint
-        )
+        if type == 'median':
+            denoised = sci_ndi.median_filter(
+                data,
+                mode=mode,
+                footprint=footprint
+            )
+        else:
+            denoised = sci_ndi.gaussian_filter(
+                data,
+                mode=mode,
+                sigma=sigma
+            )
     else:
         if ch_id is None:
             print(
-                "WARNING: a ch_id should be provided to identify the channel. The data was not denoised.")
+                "WARNING: a ch_id should be provided to identify the channel. The data was not denoised."
+            )
         else:
             file = osp.splitext(filename_root)
-            file = file[0] + \
-                "-{}-{}-den-{}.npy".format(ch_id, data.shape, footprint_dim)
+            if type == 'median':
+                file = file[0] + \
+                    "-{}-{}-den-med-{}.npy".format(ch_id,
+                                                   data.shape, footprint_dim)
+            else:
+                file = file[0] + \
+                    "-{}-{}-den-gaus-{}.npy".format(
+                        ch_id, data.shape, tuple(np.round(sigma, decimals=2)))
             try:
                 denoised = np.load(file)
             except OSError:
-                denoised = sci_ndi.median_filter(
-                    data,
-                    mode='constant',
-                    footprint=footprint
-                )
+                if type == 'median':
+                    denoised = sci_ndi.median_filter(
+                        data,
+                        mode=mode,
+                        footprint=footprint
+                    )
+                else:
+                    denoised = sci_ndi.gaussian_filter(
+                        data,
+                        mode=mode,
+                        sigma=sigma
+                    )
                 try:
                     np.save(file, denoised)
                 except:
@@ -142,44 +101,20 @@ def denoise(data, footprint=None, filename_root=None, ch_id=None, stretch=True):
     return denoised
 
 
-# Denoise nuclei channel
-print("Denoising nuclei's channel...")
-nuclei_den = denoise(
-    data[NUCLEI_CH, ...],
-    footprint=ski_mor.ball(7)[3::4, ...],
-    filename_root=filename,
-    ch_id=ch_dict[NUCLEI_CH],
-    stretch=True
-)
-viewer.add_image(
-    nuclei_den,
-    name=ch_dict[NUCLEI_CH] + '-den',
-    colormap="magenta",
-    blending="additive",
-    scale=spacing,
-    interpolation="nearest",
-    visible=False
-)
-
-# Threshold denoised nuclei channel
-print("Thresholding nuclei...", end="", flush=True)
-nuclei_mask = nuclei_den > ski_fil.threshold_otsu(nuclei_den)
-viewer.add_image(
-    nuclei_mask,
-    name=ch_dict[NUCLEI_CH] + '-msk',
-    opacity=0.5,
-    scale=spacing,
-    colormap="blue",
-    blending="additive",
-    interpolation="nearest",
-    visible=False
-)
-print("done!")
+def remove_floor(data, sigma=(20, 100, 100), filename_root=None, ch_id=None):
+    noise_floor = denoise(
+        data,
+        type='gaussian',
+        sigma=sigma,
+        mode='reflect',
+        filename_root=filename_root,
+        ch_id=ch_id
+    )
+    defloored = data.astype('int16') - noise_floor.astype('int16')
+    return np.maximum(defloored, 0).astype('uint8')
 
 
-def detect_blobs(data, min_sigma=1, max_sigma=50, num_sigma=10, threshold=0.01, filename_root=None, ch_id=None):
-    # TODO: might be good to use a range of sigmas
-    #       Requires more memory or some cropping before analysis
+def detect_blobs(data, min_sigma=1, max_sigma=50, num_sigma=10, threshold=0.01, overlap=0.75, filename_root=None, ch_id=None):
     blobs_ctrs = np.zeros((1, 3))
     print("Detecting blobs' centers...", end="", flush=True)
     if filename_root is None:
@@ -189,6 +124,7 @@ def detect_blobs(data, min_sigma=1, max_sigma=50, num_sigma=10, threshold=0.01, 
             max_sigma=max_sigma * np.array((1 / spacing_ratio, 1, 1)),
             num_sigma=num_sigma,
             threshold=threshold,
+            overlap=overlap,
             exclude_border=True
         )
     else:
@@ -219,18 +155,172 @@ def detect_blobs(data, min_sigma=1, max_sigma=50, num_sigma=10, threshold=0.01, 
     return blobs_ctrs
 
 
-print("Detecting nuclei's centers...")
+# Specify channels
+NUCLEI_CH = 0
+FISH_647_CH = 1
+FISH_568_CH = 2
+CYTO_CH = 3
+ch_dict = {
+    NUCLEI_CH: 'Nuclei',
+    FISH_647_CH: 'FISH_647',
+    FISH_568_CH: 'FISH_568',
+    CYTO_CH: 'Cytoplasm'
+}
+
+# Ask user to choose a file
+filename = filedialog.askopenfilenames()[0]
+print("\n--- Starting new analysis ---")
+
+# Load image and extract data
+print("Loading file {}...".format(filename), end="", flush=True)
+original = AICSImage(filename)
+data = original.get_image_data("CZYX")
+print("done!")
+
+# Gather and report image information
+pixel_sizes = original.physical_pixel_sizes
+spacing = (pixel_sizes.Z, pixel_sizes.Y, pixel_sizes.X)
+spacing_ratio = int(np.ceil(spacing[0] / spacing[1]))
+contrast = [np.min(data), np.max(data)]
+channels = original.channel_names
+print("Original data info:")
+print("- Image shape (CH, Z, Y, X): {}".format(data.shape))
+print("- Pixel sizes (Z, Y, X): {}".format(spacing))
+print("  - Spacing ratio (Z / X, Y): {}".format(spacing_ratio))
+print("- Data type: {}".format(original.dtype))
+print("- Data range: {}".format(contrast))
+print("- Channels: {} ({})".format(channels, [v for v in ch_dict.values()]))
+
+# --- Development only: shrink data ---
+# dds = [np.floor(d//5).astype('uint16') for d in data.shape]
+# dde = [np.ceil(d - d//5).astype('uint16') for d in data.shape]
+# data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
+# -------------------------------------
+
+# Contrast stretch each channel
+for ch in range(data.shape[0]):
+    print("Processing channel {}:".format(ch_dict[ch]))
+    data[ch, ...] = contrast_stretch(data[ch, ...])
+
+# If needed, convert to uint8
+if data.dtype != 'uint8':
+    data = uint16_to_uint8(data)
+
+# Show original data
+viewer = napari.Viewer(
+    title=osp.split(filename)[1],
+    ndisplay=3
+)
+viewer.add_image(
+    data,
+    channel_axis=0,
+    name=ch_dict.values(),
+    colormap="green",
+    blending="additive",
+    scale=spacing,
+    depiction="volume",
+    interpolation="nearest",
+    visible=False
+)
+
+# Remove background noise from nuclei channel
+print("Removing floor from nuclei's channel:")
+nuclei_defloored = remove_floor(
+    data[NUCLEI_CH, ...],
+    sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
+    filename_root=filename,
+    ch_id=ch_dict[NUCLEI_CH]
+)
+viewer.add_image(
+    nuclei_defloored,
+    name=ch_dict[NUCLEI_CH] + '-deflo',
+    colormap="magenta",
+    blending="additive",
+    scale=spacing,
+    interpolation="nearest",
+    visible=False
+)
+
+# Apply a local histogram stretching to the nuclei channel
+print("Local histogram stretching nuclei's channel...", end="", flush=True)
+nuclei_hist = ski_exp.equalize_adapthist(
+    nuclei_defloored,
+    15 * np.array((1 / spacing_ratio, 1, 1))
+)
+nuclei_hist = np.round(255 * nuclei_hist).astype('uint8')
+viewer.add_image(
+    nuclei_hist,
+    name=ch_dict[NUCLEI_CH] + '-hist',
+    colormap="magenta",
+    blending="additive",
+    scale=spacing,
+    interpolation="nearest",
+    visible=False
+)
+print("done!")
+
+# Apply median filter to denoise the nuclei channel
+print("Denoising nuclei's channel:")
+nuclei_den = denoise(
+    nuclei_hist,
+    footprint=ski_mor.ball(7)[3::4, ...],
+    filename_root=filename,
+    ch_id=ch_dict[NUCLEI_CH],
+    stretch=True
+)
+viewer.add_image(
+    nuclei_den,
+    name=ch_dict[NUCLEI_CH] + '-den',
+    colormap="magenta",
+    blending="additive",
+    scale=spacing,
+    interpolation="nearest",
+    visible=False
+)
+
+# Semantic segmentation to identify all nuclei
+print("Thresholding nuclei...", end="", flush=True)
+nuclei_mask = nuclei_den > ski_fil.threshold_otsu(nuclei_den)
+viewer.add_image(
+    nuclei_mask,
+    name=ch_dict[NUCLEI_CH] + '-msk',
+    opacity=0.5,
+    scale=spacing,
+    colormap="blue",
+    blending="additive",
+    interpolation="nearest",
+    visible=False
+)
+print("done!")
+
+# TODO: following the threshold with the nearest neighbor creates some regions
+#       that have the same ID but are segmented. There might be multiple
+#       fractions of a nucleus that are identified while there is a single
+#       center that is detected. They are all the closest, but they are many.
+#       The result is an error while evaluating the properties.
+#       Should remove the smallest regions before the nearest neighbors.
+
+# TODO: evaluate the actual physical dimensions of the nuclei and use the
+#       voxel dimension info to decide the sigma of the radius. Maybe use a
+#       small range around the expected value.
+
+# TODO: might be good to use a range of sigmas but it requires more memory or
+#       some cropping before analysis. Could use the bbox of the thresholded
+#       nuclei, but it might miss some low intensity ones. Might be good anyway.
+
+# Detect the centers of the nuclei
+print("Detecting nuclei's centers:")
 nuclei_ctrs = detect_blobs(
-    data[NUCLEI_CH],
-    min_sigma=20,
-    max_sigma=20,
+    nuclei_den,
+    min_sigma=25,
+    max_sigma=25,
     num_sigma=1,
-    threshold=0.01,
+    threshold=0.1,
     filename_root=filename,
     ch_id=ch_dict[NUCLEI_CH]
 )
 
-print(nuclei_ctrs)
+print("Detected centers:\n", nuclei_ctrs)
 
 viewer.add_points(
     nuclei_ctrs[:, :3],
@@ -245,8 +335,8 @@ viewer.add_points(
     out_of_slice_display=True,
     visible=False
 )
-print("done!")
 
+# Instance segmentation to identify individual nuclei
 # Find the equivalent to Voronoi regions based on detected nuclei's centers
 # Coordinates are normalized to the physical size before evaluating the regions
 print("Identifying Voronoi regions within nuclei's mask...", end="", flush=True)
@@ -271,7 +361,7 @@ viewer.add_labels(
 print("done!")
 
 # Evaluate potential nuclei properties
-print("Evaluating potential nuclei properties...")
+print("Evaluating potential nuclei properties:")
 nuclei_props_df = pd.DataFrame(
     ski_mea.regionprops_table(
         nuclei_labels_voronoi,
@@ -285,64 +375,258 @@ nuclei_props_df = pd.DataFrame(
     )
 )
 
-nuclei_props_df.loc[:, 'keep'] = True  # Keep all for now
+nuclei_props_df.loc[:, 'keep'] = True  # Keep all nuclei for now
 
-print(nuclei_props_df)
+print("Nuclei's properties:\n", nuclei_props_df)
 
-print("done!")
+# If cytoplasm channel exists, use it
+if data.shape[0] == 4:
+    # Remove background noise from cytoplasm channel
+    print("Removing floor from cytoplasm's channel:")
+    cyto_defloored = remove_floor(
+        data[CYTO_CH, ...],
+        sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
+        filename_root=filename,
+        ch_id=ch_dict[CYTO_CH]
+    )
+    viewer.add_image(
+        cyto_defloored,
+        name=ch_dict[CYTO_CH] + '-deflo',
+        colormap="magenta",
+        blending="additive",
+        scale=spacing,
+        interpolation="nearest",
+        visible=False
+    )
+
+    # Apply a local histogram stretching to the nuclei channel
+    print("Local histogram stretching cytoplasm's channel...", end="", flush=True)
+    cyto_hist = ski_exp.equalize_adapthist(
+        cyto_defloored,
+        15 * np.array((1 / spacing_ratio, 1, 1))
+    )
+    cyto_hist = np.round(255 * cyto_hist).astype('uint8')
+    viewer.add_image(
+        cyto_hist,
+        name=ch_dict[CYTO_CH] + '-hist',
+        colormap="magenta",
+        blending="additive",
+        scale=spacing,
+        interpolation="nearest",
+        visible=False
+    )
+    print("done!")
+
+    # Apply median filter to denoise the cytoplasm channel
+    print("Denoising cytoplasm's channel:")
+    cyto_den = denoise(
+        cyto_hist,
+        footprint=ski_mor.ball(7)[3::4, ...],
+        filename_root=filename,
+        ch_id=ch_dict[CYTO_CH],
+        stretch=True
+    )
+    viewer.add_image(
+        cyto_den,
+        name=ch_dict[CYTO_CH] + '-den',
+        colormap="magenta",
+        blending="additive",
+        scale=spacing,
+        interpolation="nearest",
+        visible=False
+    )
+
+    # Semantic segmentation to identify all cytoplasm
+    print("Thresholding cytoplasm...", end="", flush=True)
+    cyto_mask = cyto_den > ski_fil.threshold_otsu(cyto_den)
+    viewer.add_image(
+        cyto_mask,
+        name=ch_dict[CYTO_CH] + '-msk',
+        opacity=0.5,
+        scale=spacing,
+        colormap="blue",
+        blending="additive",
+        interpolation="nearest",
+        visible=False
+    )
+    print("done!")
+
+    # Instance segmentation to identify region of cytoplasm belonging to a
+    # particular nucleus
+    # Find the equivalent to Voronoi regions based on detected nuclei's centers
+    # Coordinates are normalized to the physical size before evaluating the
+    # regions
+    print("Identifying Voronoi regions within cytoplasm's mask...", end="", flush=True)
+    cyto_mask_idx = cyto_mask.nonzero()
+    cyto_mask_idx_array = np.vstack(cyto_mask_idx).T
+    closest_nucleus = nuclei_ctrs_tree.query(
+        cyto_mask_idx_array * (spacing_ratio, 1, 1)
+    )
+    cyto_labels_voronoi = np.zeros_like(data[CYTO_CH])
+    # The +1 is to start the labels at 1 instead of 0
+    cyto_labels_voronoi[cyto_mask_idx[0],
+                        cyto_mask_idx[1],
+                        cyto_mask_idx[2]] = closest_nucleus[1] + 1
+    viewer.add_labels(
+        cyto_labels_voronoi,
+        name=ch_dict[CYTO_CH] + '-lbls',
+        scale=spacing,
+        blending="additive",
+        visible=False
+    )
+    print("done!")
+
 
 # --- Identify FISH puncta in the other channels ---
-# -- Identify the 568 FISH signals --
-print("Identifying potential 568nm channel puncta's centers within nuclei's bboxes...")
-detections_dfs = []
-for i, row in nuclei_props_df[nuclei_props_df['keep']].iterrows():
-    print('{}/{}'.format(i, len(nuclei_props_df)))
+print("Identifying FISH puncta's centers within nuclei's bboxes...")
+detections_647_dfs = []
+detections_568_dfs = []
+
+for idx, row in nuclei_props_df[nuclei_props_df['keep']].iterrows():
+    print('--- {} / {} (lbl: {}) ---'.format(idx,
+          len(nuclei_props_df), row['label']))
     sl = row['slice']
-    # Find location withing the bbox and shift coordinates
-    ctrs = detect_blobs(
-        data[FISH_568_CH, sl[0], sl[1], sl[2]],
-        min_sigma=1,
-        max_sigma=21,
-        num_sigma=42,
-        threshold=0.15,
+
+    # Find location within the bbox and shift coordinates
+    print("{} channel ".format(ch_dict[FISH_647_CH]))
+    # Denoise nuclei channel
+    noise_floor = denoise(
+        data[FISH_647_CH, sl[0], sl[1], sl[2]],
+        type='gaussian',
+        sigma=20 * np.array((1 / spacing_ratio, 1, 1)),
+        mode='reflect',
+        ch_id=ch_dict[FISH_647_CH]
+    )
+    defloored = data[FISH_647_CH, sl[0], sl[1], sl[2]].astype(
+        'int16') - noise_floor.astype('int16')
+    defloored = np.maximum(defloored, 0).astype('uint8')
+    defloored = contrast_stretch(defloored)
+    ctrs_647 = detect_blobs(
+        defloored,
+        min_sigma=2,
+        max_sigma=10,
+        num_sigma=17,
+        threshold=0.2,
     ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
-    detections_dfs.append(
+    detections_647_dfs.append(
         pd.DataFrame(
-            ctrs,
+            ctrs_647,
             columns=['Z', 'Y', 'X', 'sigma_Z', 'sigma_Y', 'sigma_X']
         )
     )
-fish_568_puncta_ctrs_df = pd.concat(detections_dfs)
-fish_568_puncta_ctrs_df.loc[:, 'label'] = range(len(fish_568_puncta_ctrs_df))
-print("{} detected".format(len(fish_568_puncta_ctrs_df)))
-print("sigmas:\n", fish_568_puncta_ctrs_df[[
-      'sigma_Z', 'sigma_Y', 'sigma_X']].describe())
-print("done!")
 
-# Select 568 FISH signatures within nuclei
-print("Assigning 568nm puncta to nuclei...", end="", flush=True)
+    print("{} channel ".format(ch_dict[FISH_568_CH]))
+    noise_floor = denoise(
+        data[FISH_568_CH, sl[0], sl[1], sl[2]],
+        type='gaussian',
+        sigma=20 * np.array((1 / spacing_ratio, 1, 1)),
+        mode='reflect',
+        ch_id=ch_dict[FISH_647_CH]
+    )
+    defloored = data[FISH_568_CH, sl[0], sl[1], sl[2]].astype(
+        'int16') - noise_floor.astype('int16')
+    defloored = np.maximum(defloored, 0).astype('uint8')
+    defloored = contrast_stretch(defloored)
+    ctrs_568 = detect_blobs(
+        defloored,
+        min_sigma=2,
+        max_sigma=10,
+        num_sigma=17,
+        threshold=0.2,
+    ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
+    detections_568_dfs.append(
+        pd.DataFrame(
+            ctrs_568,
+            columns=['Z', 'Y', 'X', 'sigma_Z', 'sigma_Y', 'sigma_X']
+        )
+    )
+
+fish_647_puncta_ctrs_df = pd.concat(detections_647_dfs)
+fish_647_puncta_ctrs_df.reset_index(drop=True, inplace=True)
+fish_647_puncta_ctrs_df.loc[:, 'label'] = range(len(fish_647_puncta_ctrs_df))
+
+fish_568_puncta_ctrs_df = pd.concat(detections_568_dfs)
+fish_568_puncta_ctrs_df.reset_index(drop=True, inplace=True)
+fish_568_puncta_ctrs_df.loc[:, 'label'] = range(len(fish_568_puncta_ctrs_df))
+
+# Select FISH signatures within nuclei
+print("Assigning FISH puncta to nuclei...", end="", flush=True)
+fish_647_puncta_ctrs_df.loc[:, ['keep', 'nucleus']] = False, None
+nuclei_props_df.loc[:, ch_dict[FISH_647_CH] + '_cnt'] = 0
+nuclei_props_df[ch_dict[FISH_647_CH] + '_ids'] = [[]
+                                                  for _ in range(len(nuclei_props_df))]
+
+for _, row in fish_647_puncta_ctrs_df.iterrows():
+    coo = row[['Z', 'Y', 'X']].astype('uint16')
+    label = nuclei_labels_voronoi[coo[0], coo[1], coo[2]]
+    if label != 0:
+        nuclei_props_df.loc[
+            nuclei_props_df['label'] == label,
+            ch_dict[FISH_647_CH] + '_cnt'
+        ] += 1
+        nuclei_props_df.loc[
+            nuclei_props_df['label'] == label,
+            ch_dict[FISH_647_CH] + '_ids'
+        ].values[0].append(row['label'])
+        fish_647_puncta_ctrs_df.loc[
+            fish_647_puncta_ctrs_df['label'] == row['label'],
+            ['keep', 'nucleus']
+        ] = True, label
+
 fish_568_puncta_ctrs_df.loc[:, ['keep', 'nucleus']] = False, None
-nuclei_props_df.loc[:, channels[FISH_568_CH] + '_cnt'] = 0
-nuclei_props_df[channels[FISH_568_CH] + '_ids'] = [[]
-                                                   for _ in range(len(nuclei_props_df))]
+nuclei_props_df.loc[:, ch_dict[FISH_568_CH] + '_cnt'] = 0
+nuclei_props_df[ch_dict[FISH_568_CH] + '_ids'] = [[]
+                                                  for _ in range(len(nuclei_props_df))]
+
 for _, row in fish_568_puncta_ctrs_df.iterrows():
     coo = row[['Z', 'Y', 'X']].astype('uint16')
     label = nuclei_labels_voronoi[coo[0], coo[1], coo[2]]
     if label != 0:
         nuclei_props_df.loc[
             nuclei_props_df['label'] == label,
-            channels[FISH_568_CH] + '_cnt'
+            ch_dict[FISH_568_CH] + '_cnt'
         ] += 1
         nuclei_props_df.loc[
             nuclei_props_df['label'] == label,
-            channels[FISH_568_CH] + '_ids'
+            ch_dict[FISH_568_CH] + '_ids'
         ].values[0].append(row['label'])
         fish_568_puncta_ctrs_df.loc[
             fish_568_puncta_ctrs_df['label'] == row['label'],
             ['keep', 'nucleus']
         ] = True, label
 
-# Create a point layer with only the 568 puncta within nuclei
+# Some stats
+print("{} channel".format(ch_dict[FISH_647_CH]))
+tmp = fish_647_puncta_ctrs_df.loc[fish_647_puncta_ctrs_df['keep']]
+print("{} detected".format(len(tmp)))
+print("sigmas:", tmp[[
+      'sigma_Z', 'sigma_Y', 'sigma_X']].describe())
+print("{} channel".format(ch_dict[FISH_568_CH]))
+tmp = fish_568_puncta_ctrs_df.loc[fish_568_puncta_ctrs_df['keep']]
+print("{} detected".format(len(tmp)))
+print("sigmas:", tmp[[
+      'sigma_Z', 'sigma_Y', 'sigma_X']].describe())
+print("done!")
+
+
+# Create point layers with FISH puncta within nuclei
+viewer.add_points(
+    fish_647_puncta_ctrs_df.loc[
+        fish_647_puncta_ctrs_df['keep'],
+        ['Z', 'Y', 'X']
+    ].to_numpy(),
+    name=ch_dict[FISH_647_CH] + '-puncta',
+    size=5,
+    symbol='disc',
+    opacity=0.2,
+    scale=spacing,
+    edge_color='blue',
+    face_color='blue',
+    blending="additive",
+    out_of_slice_display=True,
+    visible=False
+)
+
 viewer.add_points(
     fish_568_puncta_ctrs_df.loc[
         fish_568_puncta_ctrs_df['keep'],
@@ -359,9 +643,73 @@ viewer.add_points(
     out_of_slice_display=True,
     visible=False
 )
+
 print("done!")
 
+# Plot 647 vs 538 for each nucleus
+plt.figure()
+scatter = sbn.scatterplot(
+    nuclei_props_df.loc[nuclei_props_df['keep']],
+    x=ch_dict[FISH_568_CH] + '_cnt',
+    y=ch_dict[FISH_647_CH] + '_cnt',
+)
+
+top = max(nuclei_props_df[ch_dict[FISH_568_CH] + '_cnt'].max(),
+          nuclei_props_df[ch_dict[FISH_647_CH] + '_cnt'].max())
+plt.xlim((0, top))
+plt.ylim((0, top))
+plt.title(osp.split(filename)[1])
+plt.axis('square')
+plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+for _, row in nuclei_props_df.loc[nuclei_props_df['keep']].iterrows():
+    plt.annotate(
+        row['label'],
+        (
+            row[ch_dict[FISH_568_CH] + '_cnt'] + 0.25,
+            row[ch_dict[FISH_647_CH] + '_cnt'] + 0.25
+        )
+    )
+
+
+file = osp.splitext(filename)
+plt.savefig(
+    file[0] + "-{}-{}-FISH_plot.pdf".format(
+        ch_dict[NUCLEI_CH],
+        data[NUCLEI_CH, ...].shape
+    ),
+    bbox_inches='tight'
+)
+
+# Save the dataframes
+print("Saving the nuclei's and puncta's property dataframes...", end="", flush=True)
+file = osp.splitext(filename)
+nuclei_props_df.to_json(
+    file[0] + "-{}-{}-FISH_df.json".format(
+        ch_dict[NUCLEI_CH],
+        data[NUCLEI_CH, ...].shape
+    )
+)
+fish_647_puncta_ctrs_df.to_json(
+    file[0] + "-{}-{}-FISH_df.json".format(
+        ch_dict[FISH_647_CH],
+        data[FISH_647_CH, ...].shape
+    )
+)
+fish_568_puncta_ctrs_df.to_json(
+    file[0] + "-{}-{}-FISH_df.json".format(
+        ch_dict[FISH_568_CH],
+        data[FISH_568_CH, ...].shape
+    )
+)
+print("done!")
+
+
+plt.show()
 napari.run()
+
+# **************************************************************
+# **************************************************************
+# **************************************************************
 
 
 # Bounding surfaces for thresholded nuclei
@@ -414,7 +762,7 @@ print("done!")
 # Evaluate nuclei's volume statistics and use to select individual nuclei
 # NOTE: This only really works, when it works, with the large median filter in x and y.
 nuclei_min_vol, nuclei_med_vol, nuclei_max_vol = nuclei_props_df['area'].quantile([
-                                                                                  0.25, 0.5, 0.75])
+    0.25, 0.5, 0.75])
 nuclei_mean = nuclei_props_df['area'].mean()
 nuclei_std = nuclei_props_df['area'].std()
 print(" - Volumes quantiles: {}, {}, {}".format(
@@ -524,96 +872,6 @@ print("done!")
 # nuclei_labels = ski_mor.dilation(nuclei_labels, footprint=ski_mor.ball(3))
 ################################################################################
 
-
-# -- Identify the 647 FISH signals --
-print("Identifying 647nm channel puncta...", end="", flush=True)
-fish_647_puncta = ski_fea.blob_log(
-    data[FISH_647_CH],
-    min_sigma=4 * np.array((1 / spacing_ratio, 1, 1)),
-    max_sigma=7 * np.array((1 / spacing_ratio, 1, 1)),
-    num_sigma=10,
-    threshold=0.01,
-    exclude_border=True
-)
-fish_647_puncta_df = pd.DataFrame(
-    fish_647_puncta, columns=['Z', 'Y', 'X', 'sigma'])
-fish_647_puncta_df.loc[:, 'label'] = range(fish_647_puncta_df.shape[0])
-print("{} detected".format(len(fish_647_puncta)))
-print("sigmas:\n", fish_647_puncta_df['sigma'].describe())
-viewer.add_points(
-    fish_647_puncta[:, :3],
-    name='fish_647_puncta',
-    size=5,
-    symbol='disc',
-    opacity=0.2,
-    scale=spacing,
-    edge_color='blue',
-    face_color='blue',
-    blending="additive",
-    out_of_slice_display=True,
-    visible=False
-)
-print("done!")
-
-# Select 647 FISH signatures within nuclei
-print("Assigning 647nm puncta to nuclei...", end="", flush=True)
-fish_647_puncta_df.loc[:, ['keep', 'nucleus']] = False, None
-nuclei_props_df.loc[:, channels[FISH_647_CH] + '_cnt'] = 0
-nuclei_props_df[channels[FISH_647_CH] + '_ids'] = [[]
-                                                   for _ in range(nuclei_props_df.shape[0])]
-for _, row in fish_647_puncta_df.iterrows():
-    coo = row[['Z', 'Y', 'X']].astype('uint16')
-    label = nuclei_labels[coo[0], coo[1], coo[2]]
-    if label != 0:
-        nuclei_props_df.loc[nuclei_props_df['label'] ==
-                            label, channels[FISH_647_CH] + '_cnt'] += 1
-        nuclei_props_df.loc[nuclei_props_df['label'] == label,
-                            channels[FISH_647_CH] + '_ids'].values[0].append(row['label'])
-        fish_647_puncta_df.loc[fish_647_puncta_df['label']
-                               == row['label'], ['keep', 'nucleus']] = True, label
-print("done!")
-
-# Create a point layer with only the 647 puncta within nuclei
-fish_647_puncta_masked = fish_647_puncta_df.loc[fish_647_puncta_df['keep'], [
-    'Z', 'Y', 'X']].to_numpy()
-viewer.add_points(
-    fish_647_puncta_masked,
-    size=5,
-    symbol='disc',
-    opacity=0.2,
-    scale=spacing,
-    edge_color='blue',
-    face_color='blue',
-    blending="additive",
-    out_of_slice_display=True,
-    visible=False
-)
-
-plt.figure()
-sbn.scatterplot(
-    nuclei_props_df[nuclei_props_df['keep']],
-    x=channels[FISH_568_CH] + '_cnt',
-    y=channels[FISH_647_CH] + '_cnt',
-)
-top = max(nuclei_props_df[channels[FISH_568_CH] + '_cnt'].max(),
-          nuclei_props_df[channels[FISH_647_CH] + '_cnt'].max())
-plt.xlim((0, top))
-plt.ylim((0, top))
-plt.title(osp.split(filename)[1])
-plt.axis('square')
-plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
-
-# Save the dataframes
-print("Saving the nuclei's and puncta property dataframe...", end="", flush=True)
-file = osp.splitext(filename)
-nuclei_props_df.to_json(file[0] + "-{}-nuclei_df.json".format(data.shape))
-fish_568_puncta_ctrs_df.to_json(file[0] + "-{}-568_df.json".format(data.shape))
-fish_647_puncta_df.to_json(file[0] + "-{}-647_df.json".format(data.shape))
-print("done!")
-
-
-plt.show()
-napari.run()
 
 # TODO: Software to check:
 #        - CellProfiler (https://cellprofiler.org/)
