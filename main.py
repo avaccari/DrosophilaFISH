@@ -4,11 +4,14 @@ import napari
 import numpy as np
 import scipy.ndimage as sci_ndi
 import scipy.spatial as sci_spa
+import scipy.stats as sci_sta
 import skimage.filters as ski_fil
+import skimage.filters.rank as ski_fil_ran
 import skimage.exposure as ski_exp
 import skimage.measure as ski_mea
 import skimage.feature as ski_fea
 import skimage.morphology as ski_mor
+import skimage.segmentation as ski_seg
 import seaborn as sbn
 import matplotlib.pyplot as plt
 import os.path as osp
@@ -30,10 +33,10 @@ def uint16_to_uint8(data):
     return converted
 
 
-def denoise(data, type='median', footprint=None, sigma=(2, 10, 10), mode='constant', filename_root=None, ch_id=None, stretch=False):
-    denoised = data.copy()
+def filter(data, type='median', footprint=None, sigma=(2, 10, 10), mode='nearest', cval=0, filename_root=None, ch_id=None, stretch=False):
+    filtered = data.copy()
 
-    if type not in ['median', 'gaussian']:
+    if type not in ['median', 'gaussian', 'closing']:
         print(
             "WARNING: the specified mode is not available."
         )
@@ -48,16 +51,23 @@ def denoise(data, type='median', footprint=None, sigma=(2, 10, 10), mode='consta
 
     if filename_root is None:
         if type == 'median':
-            denoised = sci_ndi.median_filter(
+            filtered = sci_ndi.median_filter(
                 data,
                 mode=mode,
+                cval=cval,
                 footprint=footprint
             )
-        else:
-            denoised = sci_ndi.gaussian_filter(
+        elif type == 'gaussian':
+            filtered = sci_ndi.gaussian_filter(
                 data,
                 mode=mode,
+                cval=cval,
                 sigma=sigma
+            )
+        else:
+            filtered = ski_mor.closing(
+                data,
+                footprint=footprint
             )
     else:
         if ch_id is None:
@@ -70,43 +80,53 @@ def denoise(data, type='median', footprint=None, sigma=(2, 10, 10), mode='consta
                 file = file[0] + \
                     "-{}-{}-den-med-{}.npy".format(ch_id,
                                                    data.shape, footprint_dim)
-            else:
+            elif type == 'gaussian':
                 file = file[0] + \
                     "-{}-{}-den-gaus-{}.npy".format(
                         ch_id, data.shape, tuple(np.round(sigma, decimals=2)))
+            else:
+                file = file[0] + \
+                    "-{}-{}-den-clos-{}.npy".format(
+                        ch_id, data.shape, footprint_dim)
             try:
-                denoised = np.load(file)
+                filtered = np.load(file)
             except OSError:
                 if type == 'median':
-                    denoised = sci_ndi.median_filter(
+                    filtered = sci_ndi.median_filter(
                         data,
                         mode=mode,
+                        cval=cval,
                         footprint=footprint
                     )
-                else:
-                    denoised = sci_ndi.gaussian_filter(
+                elif type == 'gaussian':
+                    filtered = sci_ndi.gaussian_filter(
                         data,
                         mode=mode,
+                        cval=cval,
                         sigma=sigma
                     )
+                else:
+                    filtered = ski_mor.closing(
+                        data,
+                        footprint=footprint
+                    )
                 try:
-                    np.save(file, denoised)
+                    np.save(file, filtered)
                 except:
                     print("WARNING: error saving the file.")
     print("done!")
 
     if stretch:
-        denoised = contrast_stretch(denoised)
+        filtered = contrast_stretch(filtered)
 
-    return denoised
+    return filtered
 
 
 def remove_floor(data, sigma=(20, 100, 100), filename_root=None, ch_id=None):
-    noise_floor = denoise(
+    noise_floor = filter(
         data,
         type='gaussian',
         sigma=sigma,
-        mode='reflect',
         filename_root=filename_root,
         ch_id=ch_id
     )
@@ -114,14 +134,17 @@ def remove_floor(data, sigma=(20, 100, 100), filename_root=None, ch_id=None):
     return np.maximum(defloored, 0).astype('uint8')
 
 
-def detect_blobs(data, min_sigma=1, max_sigma=50, num_sigma=10, threshold=0.01, overlap=0.75, filename_root=None, ch_id=None):
+def detect_blobs(data, min_sigma=1, max_sigma=50, num_sigma=10, z_y_x_ratio=None, threshold=0.01, overlap=0.75, filename_root=None, ch_id=None):
+    if z_y_x_ratio is not None:
+        min_sigma = min_sigma * np.array(z_y_x_ratio)
+        max_sigma = max_sigma * np.array(z_y_x_ratio)
     blobs_ctrs = np.zeros((1, 3))
     print("Detecting blobs' centers...", end="", flush=True)
     if filename_root is None:
         blobs_ctrs = ski_fea.blob_log(
             data,
-            min_sigma=min_sigma * np.array((1 / spacing_ratio, 1, 1)),
-            max_sigma=max_sigma * np.array((1 / spacing_ratio, 1, 1)),
+            min_sigma=min_sigma,
+            max_sigma=max_sigma,
             num_sigma=num_sigma,
             threshold=threshold,
             overlap=overlap,
@@ -140,8 +163,8 @@ def detect_blobs(data, min_sigma=1, max_sigma=50, num_sigma=10, threshold=0.01, 
             except OSError:
                 blobs_ctrs = ski_fea.blob_log(
                     data,
-                    min_sigma=min_sigma * np.array((1 / spacing_ratio, 1, 1)),
-                    max_sigma=max_sigma * np.array((1 / spacing_ratio, 1, 1)),
+                    min_sigma=min_sigma,
+                    max_sigma=max_sigma,
                     num_sigma=num_sigma,
                     threshold=threshold,
                     exclude_border=True
@@ -168,8 +191,8 @@ ch_dict = {
 }
 
 # Ask user to choose a file
-filename = filedialog.askopenfilenames()[0]
 print("\n--- Starting new analysis ---")
+filename = filedialog.askopenfilename()
 
 # Load image and extract data
 print("Loading file {}...".format(filename), end="", flush=True)
@@ -200,7 +223,7 @@ print("- Channels: {} ({})".format(channels, [v for v in ch_dict.values()]))
 # Contrast stretch each channel
 for ch in range(data.shape[0]):
     print("Processing channel {}:".format(ch_dict[ch]))
-    data[ch, ...] = contrast_stretch(data[ch, ...])
+    data[ch] = contrast_stretch(data[ch])
 
 # If needed, convert to uint8
 if data.dtype != 'uint8':
@@ -226,7 +249,7 @@ viewer.add_image(
 # Remove background noise from nuclei channel
 print("Removing floor from nuclei's channel:")
 nuclei_defloored = remove_floor(
-    data[NUCLEI_CH, ...],
+    data[NUCLEI_CH],
     sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
     filename_root=filename,
     ch_id=ch_dict[NUCLEI_CH]
@@ -241,32 +264,31 @@ viewer.add_image(
     visible=False
 )
 
-# Apply a local histogram stretching to the nuclei channel
-print("Local histogram stretching nuclei's channel...", end="", flush=True)
-nuclei_hist = ski_exp.equalize_adapthist(
-    nuclei_defloored,
-    15 * np.array((1 / spacing_ratio, 1, 1))
-)
-nuclei_hist = np.round(255 * nuclei_hist).astype('uint8')
-viewer.add_image(
-    nuclei_hist,
-    name=ch_dict[NUCLEI_CH] + '-hist',
-    colormap="magenta",
-    blending="additive",
-    scale=spacing,
-    interpolation="nearest",
-    visible=False
-)
-print("done!")
+# # Apply a local histogram stretching to the nuclei channel
+# print("Local histogram stretching nuclei's channel...", end="", flush=True)
+# nuclei_hist = ski_exp.equalize_adapthist(
+#     nuclei_defloored,
+#     15 * np.array((1 / spacing_ratio, 1, 1))
+# )
+# nuclei_hist = np.round(255 * nuclei_hist).astype('uint8')
+# viewer.add_image(
+#     nuclei_hist,
+#     name=ch_dict[NUCLEI_CH] + '-hist',
+#     colormap="magenta",
+#     blending="additive",
+#     scale=spacing,
+#     interpolation="nearest",
+#     visible=False
+# )
+# print("done!")
 
 # Apply median filter to denoise the nuclei channel
 print("Denoising nuclei's channel:")
-nuclei_den = denoise(
-    nuclei_hist,
-    footprint=ski_mor.ball(7)[3::4, ...],
+nuclei_den = filter(
+    nuclei_defloored,
+    footprint=ski_mor.ball(7)[3::4],
     filename_root=filename,
-    ch_id=ch_dict[NUCLEI_CH],
-    stretch=True
+    ch_id=ch_dict[NUCLEI_CH]  # ! We removed the stretch
 )
 viewer.add_image(
     nuclei_den,
@@ -281,6 +303,8 @@ viewer.add_image(
 # Semantic segmentation to identify all nuclei
 print("Thresholding nuclei...", end="", flush=True)
 nuclei_mask = nuclei_den > ski_fil.threshold_otsu(nuclei_den)
+# TODO: try the minimum error thresholding:
+#       http://www.cyto.purdue.edu/cdroms/micro2/content/education/wirth04.pdf
 viewer.add_image(
     nuclei_mask,
     name=ch_dict[NUCLEI_CH] + '-msk',
@@ -292,6 +316,26 @@ viewer.add_image(
     visible=False
 )
 print("done!")
+
+# # Apply closing to nuclei's mask
+# print("Closing nuclei's mask:")
+# nuclei_closed = filter(
+#     nuclei_mask,
+#     type="closing",
+#     footprint=ski_mor.ball(7)[3::4, ...],
+#     filename_root=filename,
+#     ch_id=ch_dict[NUCLEI_CH]
+# )
+# viewer.add_image(
+#     nuclei_closed,
+#     name=ch_dict[NUCLEI_CH] + '-closed',
+#     colormap="magenta",
+#     blending="additive",
+#     scale=spacing,
+#     interpolation="nearest",
+#     visible=False
+# )
+
 
 # TODO: following the threshold with the nearest neighbor creates some regions
 #       that have the same ID but are segmented. There might be multiple
@@ -311,16 +355,24 @@ print("done!")
 # Detect the centers of the nuclei
 print("Detecting nuclei's centers:")
 nuclei_ctrs = detect_blobs(
-    nuclei_den,
+    nuclei_den.astype('float'),
     min_sigma=25,
     max_sigma=25,
     num_sigma=1,
-    threshold=0.1,
+    z_y_x_ratio=(1 / spacing_ratio, 1, 1),
+    threshold=5,
     filename_root=filename,
     ch_id=ch_dict[NUCLEI_CH]
 )
 
-print("Detected centers:\n", nuclei_ctrs)
+# # Create dataframe with nuclei centers and assign IDs
+# nuclei_ctrs_df = pd.DataFrame(
+#     nuclei_ctrs,
+#     columns=['Z', 'Y', 'X', 'sigmaZ', 'sigmaY', 'sigmaX']
+#     )
+# nuclei_ctrs_df['ID'] = range(1, 1 + len(nuclei_ctrs))
+
+print("Detected {} centers:\n{}".format(len(nuclei_ctrs), nuclei_ctrs))
 
 viewer.add_points(
     nuclei_ctrs[:, :3],
@@ -336,8 +388,8 @@ viewer.add_points(
     visible=False
 )
 
-# Instance segmentation to identify individual nuclei
-# Find the equivalent to Voronoi regions based on detected nuclei's centers
+# Find the equivalent to Voronoi regions in the nuclei's mask based on the
+# detected nuclei's centers
 # Coordinates are normalized to the physical size before evaluating the regions
 print("Identifying Voronoi regions within nuclei's mask...", end="", flush=True)
 nuclei_ctrs_tree = sci_spa.KDTree(nuclei_ctrs[:, :3] * (spacing_ratio, 1, 1))
@@ -346,45 +398,67 @@ nuclei_mask_idx_array = np.vstack(nuclei_mask_idx).T
 closest_nucleus = nuclei_ctrs_tree.query(
     nuclei_mask_idx_array * (spacing_ratio, 1, 1)
 )
-nuclei_labels_voronoi = np.zeros_like(data[NUCLEI_CH])
+nuclei_labels_voronoi = np.zeros_like(data[NUCLEI_CH], dtype='uint16')
 # The +1 is to start the labels at 1 instead of 0
 nuclei_labels_voronoi[nuclei_mask_idx[0],
                       nuclei_mask_idx[1],
                       nuclei_mask_idx[2]] = closest_nucleus[1] + 1
 viewer.add_labels(
     nuclei_labels_voronoi,
-    name=ch_dict[NUCLEI_CH] + '-lbls',
+    name=ch_dict[NUCLEI_CH] + '-vor-lbls',
     scale=spacing,
     blending="additive",
     visible=False
 )
 print("done!")
 
-# Evaluate potential nuclei properties
-print("Evaluating potential nuclei properties:")
-nuclei_props_df = pd.DataFrame(
-    ski_mea.regionprops_table(
-        nuclei_labels_voronoi,
-        properties=('label',
-                    'area',
-                    'axis_major_length',
-                    'axis_minor_length',
-                    'equivalent_diameter_area',
-                    'slice',
-                    'solidity')
-    )
+# Use watershed to identify regions connected to the nuclei centers
+print("Identifying regions within nuclei's mask with watershed...", end="", flush=True)
+
+# Create the markers
+nuclei_ctrs_img = np.zeros_like(data[NUCLEI_CH], dtype='uint16')
+nuclei_ctrs_img[nuclei_ctrs[:, 0].astype('uint16'),
+                nuclei_ctrs[:, 1].astype('uint16'),
+                nuclei_ctrs[:, 2].astype('uint16')] = range(1, 1 + len(nuclei_ctrs))
+
+# Remove markers that are not contained in the nuclei's mask
+nuclei_ctrs_img_clean = nuclei_ctrs_img & 65535 * nuclei_mask.astype('uint16')
+
+# Watershed nuclei's mask
+nuclei_labels_watershed = ski_seg.watershed(
+    nuclei_mask,
+    nuclei_ctrs_img_clean,
+    mask=nuclei_mask,
+    compactness=0
+).astype('uint16')
+viewer.add_labels(
+    nuclei_labels_watershed,
+    name=ch_dict[NUCLEI_CH] + '-ws-lbls',
+    scale=spacing,
+    blending="additive",
+    visible=False
 )
+print("done!")
 
-nuclei_props_df.loc[:, 'keep'] = True  # Keep all nuclei for now
-
-print("Nuclei's properties:\n", nuclei_props_df)
+# Final labeled nuclei mask (no cytoplasm)
+print("Combining vornoi and watershed nuclei's labeling...", end="", flush=True)
+nuclei_labels = nuclei_labels_voronoi.copy()
+nuclei_labels[nuclei_labels_voronoi != nuclei_labels_watershed] = 0
+viewer.add_labels(
+    nuclei_labels,
+    name=ch_dict[NUCLEI_CH] + '-lbls-no-cyto',
+    scale=spacing,
+    blending="additive",
+    visible=False
+)
+print("done!")
 
 # If cytoplasm channel exists, use it
 if data.shape[0] == 4:
     # Remove background noise from cytoplasm channel
     print("Removing floor from cytoplasm's channel:")
     cyto_defloored = remove_floor(
-        data[CYTO_CH, ...],
+        data[CYTO_CH],
         sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
         filename_root=filename,
         ch_id=ch_dict[CYTO_CH]
@@ -399,32 +473,13 @@ if data.shape[0] == 4:
         visible=False
     )
 
-    # Apply a local histogram stretching to the nuclei channel
-    print("Local histogram stretching cytoplasm's channel...", end="", flush=True)
-    cyto_hist = ski_exp.equalize_adapthist(
-        cyto_defloored,
-        15 * np.array((1 / spacing_ratio, 1, 1))
-    )
-    cyto_hist = np.round(255 * cyto_hist).astype('uint8')
-    viewer.add_image(
-        cyto_hist,
-        name=ch_dict[CYTO_CH] + '-hist',
-        colormap="magenta",
-        blending="additive",
-        scale=spacing,
-        interpolation="nearest",
-        visible=False
-    )
-    print("done!")
-
     # Apply median filter to denoise the cytoplasm channel
     print("Denoising cytoplasm's channel:")
-    cyto_den = denoise(
-        cyto_hist,
-        footprint=ski_mor.ball(7)[3::4, ...],
+    cyto_den = filter(
+        cyto_defloored,
+        footprint=ski_mor.ball(7)[3::4],
         filename_root=filename,
-        ch_id=ch_dict[CYTO_CH],
-        stretch=True
+        ch_id=ch_dict[CYTO_CH]
     )
     viewer.add_image(
         cyto_den,
@@ -436,9 +491,28 @@ if data.shape[0] == 4:
         visible=False
     )
 
+    # Apply closing to denoised cytoplasm channel
+    print("Closing cytoplasm's channel:")
+    cyto_closed = filter(
+        cyto_den,
+        type="closing",
+        footprint=ski_mor.ball(7)[3::4],
+        filename_root=filename,
+        ch_id=ch_dict[CYTO_CH]
+    )
+    viewer.add_image(
+        cyto_closed,
+        name=ch_dict[CYTO_CH] + '-closed',
+        colormap="magenta",
+        blending="additive",
+        scale=spacing,
+        interpolation="nearest",
+        visible=False
+    )
+
     # Semantic segmentation to identify all cytoplasm
     print("Thresholding cytoplasm...", end="", flush=True)
-    cyto_mask = cyto_den > ski_fil.threshold_otsu(cyto_den)
+    cyto_mask = cyto_closed > 0
     viewer.add_image(
         cyto_mask,
         name=ch_dict[CYTO_CH] + '-msk',
@@ -451,63 +525,193 @@ if data.shape[0] == 4:
     )
     print("done!")
 
-    # Instance segmentation to identify region of cytoplasm belonging to a
-    # particular nucleus
+    # Find the equivalent to Voronoi regions within the cytoplasm based on
+    # detected nuclei's centers.
+    # Coordinates are normalized to the physical size before evaluating the
+    # regions
+    # print("Identifying Voronoi regions within cytoplasm's mask...",
+    #       end="", flush=True)
+    # cyto_mask_idx = cyto_mask.nonzero()
+    # cyto_mask_idx_array = np.vstack(cyto_mask_idx).T
+    # closest_nucleus = nuclei_ctrs_tree.query(
+    #     cyto_mask_idx_array * (spacing_ratio, 1, 1)
+    # )
+    # cyto_labels_voronoi = np.zeros_like(data[CYTO_CH], dtype='uint16')
+    # # The +1 is to start the labels at 1 instead of 0
+    # cyto_labels_voronoi[cyto_mask_idx[0],
+    #                     cyto_mask_idx[1],
+    #                     cyto_mask_idx[2]] = closest_nucleus[1] + 1
+    # viewer.add_labels(
+    #     cyto_labels_voronoi,
+    #     name=ch_dict[CYTO_CH] + '-vor-lbls',
+    #     scale=spacing,
+    #     blending="additive",
+    #     visible=False
+    # )
+    # print("done!")
+
+    # Invert the cytoplasm mask to identify potential nuclei
+    print("Inverting cytoplasm mask...", end="", flush=True)
+    cyto_mask_inv = ~cyto_mask
+    viewer.add_image(
+        cyto_mask_inv,
+        name=ch_dict[CYTO_CH] + '-msk-inv',
+        opacity=0.5,
+        scale=spacing,
+        colormap="blue",
+        blending="additive",
+        interpolation="nearest",
+        visible=False
+    )
+    print("done!")
+
     # Find the equivalent to Voronoi regions based on detected nuclei's centers
     # Coordinates are normalized to the physical size before evaluating the
     # regions
-    print("Identifying Voronoi regions within cytoplasm's mask...", end="", flush=True)
-    cyto_mask_idx = cyto_mask.nonzero()
-    cyto_mask_idx_array = np.vstack(cyto_mask_idx).T
+    print("Identifying Voronoi regions within inverse cytoplasm's mask...",
+          end="", flush=True)
+    cyto_mask_inv_idx = cyto_mask_inv.nonzero()
+    cyto_mask_inv_idx_array = np.vstack(cyto_mask_inv_idx).T
     closest_nucleus = nuclei_ctrs_tree.query(
-        cyto_mask_idx_array * (spacing_ratio, 1, 1)
+        cyto_mask_inv_idx_array * (spacing_ratio, 1, 1)
     )
-    cyto_labels_voronoi = np.zeros_like(data[CYTO_CH])
+    cyto_inv_labels_voronoi = np.zeros_like(data[CYTO_CH], dtype='uint16')
     # The +1 is to start the labels at 1 instead of 0
-    cyto_labels_voronoi[cyto_mask_idx[0],
-                        cyto_mask_idx[1],
-                        cyto_mask_idx[2]] = closest_nucleus[1] + 1
+    cyto_inv_labels_voronoi[cyto_mask_inv_idx[0],
+                            cyto_mask_inv_idx[1],
+                            cyto_mask_inv_idx[2]] = closest_nucleus[1] + 1
     viewer.add_labels(
-        cyto_labels_voronoi,
-        name=ch_dict[CYTO_CH] + '-lbls',
+        cyto_inv_labels_voronoi,
+        name=ch_dict[CYTO_CH] + '-inv-vor-lbls',
         scale=spacing,
         blending="additive",
         visible=False
     )
     print("done!")
 
+    # Use watershed to identify regions connected to the nuclei centers
+    print("Identifying regions within inverse cytoplasm's mask with watershed...",
+          end="", flush=True)
+
+    # Remove markers that are not contained in the inverse cytoplasm's mask
+    nuclei_ctrs_img_clean = nuclei_ctrs_img & 65535 * \
+        cyto_mask_inv.astype('uint16')
+
+    # Watershed nuclei's mask
+    cyto_inv_labels_watershed = ski_seg.watershed(
+        cyto_mask_inv,
+        nuclei_ctrs_img_clean,
+        mask=cyto_mask_inv,
+        compactness=0
+    ).astype('uint16')
+    viewer.add_labels(
+        cyto_inv_labels_watershed,
+        name=ch_dict[CYTO_CH] + '-inv-ws-lbls',
+        scale=spacing,
+        blending="additive",
+        visible=False
+    )
+    print("done!")
+
+    # Final labeled nuclei mask (with cytoplasm)
+    print("Combining nuclei's labeling with inverse cytoplasm labeling...",
+          end="", flush=True)
+    nuclei_labels[nuclei_labels != cyto_inv_labels_voronoi] = 0
+    nuclei_labels[nuclei_labels != cyto_inv_labels_watershed] = 0
+    viewer.add_labels(
+        nuclei_labels,
+        name=ch_dict[NUCLEI_CH] + '-lbls-with-cyto',
+        scale=spacing,
+        blending="additive",
+        visible=False
+    )
+    print("done!")
+
+    ############################################################################
+    # Voronoi using the detected centers both for nuclei and inverted cyto.
+    # Corresponding regions should have same id in both layers.
+    # Then think about a way to combine them to optimize the segmentation.
+    # Option1:
+    # Optimize threshold level to equalize/maximize dice measure between nuclei
+    # and cytoplasm masks using the masks obtained by using Voronoi on the
+    # detected centroids. Should the smallest be adapted to match the largest or
+    # should be a process where the threshold levels are adjusted until optimal
+    # overal is found. At each iteration we might need to Voronoi again since we
+    # are modifying the mask.
+    ############################################################################
+
+################################################################################
+# Hack to be improved: Dilate preserved nuclei labels to identify nearby puncta
+print("Dilate preserved nuclei to include part of the surrounding cytoplasm...",
+      end='', flush=True)
+nuclei_labels = ski_fil_ran.maximum(
+    nuclei_labels,
+    footprint=ski_mor.ball(5)[2::3]
+)
+viewer.add_labels(
+    nuclei_labels,
+    name=ch_dict[NUCLEI_CH] + '-lbls-with-cyto-dilate',
+    scale=spacing,
+    blending="additive",
+    visible=False
+)
+print("done!")
+################################################################################
+
+# Evaluate potential nuclei properties
+# TODO: consider adding the detected centers and sigmas
+print("Evaluating potential nuclei properties from mask...", end='', flush=True)
+nuclei_props_df = pd.DataFrame(
+    ski_mea.regionprops_table(
+        nuclei_labels,
+        properties=('label',
+                    'area',
+                    'axis_major_length',
+                    'axis_minor_length',
+                    'equivalent_diameter_area',
+                    'slice',
+                    'solidity')
+    )
+)
+nuclei_props_df.loc[:, 'keep'] = True  # Keep all nuclei for now
+print('done!')
+
+print("Nuclei's properties:\n", nuclei_props_df)
 
 # --- Identify FISH puncta in the other channels ---
 print("Identifying FISH puncta's centers within nuclei's bboxes...")
 detections_647_dfs = []
 detections_568_dfs = []
+fish_568_analyzed = np.zeros_like(data[FISH_568_CH])
+fish_647_analyzed = np.zeros_like(data[FISH_647_CH])
+fish_568_threshold = 10
+fish_647_threshold = 20
 
 for idx, row in nuclei_props_df[nuclei_props_df['keep']].iterrows():
-    print('--- {} / {} (lbl: {}) ---'.format(idx,
+    print('--- {} / {} (lbl: {}) ---'.format(idx + 1,
           len(nuclei_props_df), row['label']))
     sl = row['slice']
+    max_coo = [sl[0].stop, sl[1].stop, sl[2].stop]
 
-    # Find location within the bbox and shift coordinates
-    print("{} channel ".format(ch_dict[FISH_647_CH]))
-    # Denoise nuclei channel
-    noise_floor = denoise(
+    # Find blob location within the bbox, mask, and shift coordinates
+    print("{} channel".format(ch_dict[FISH_647_CH]))
+    # Remove noise floor
+    defloored = remove_floor(
         data[FISH_647_CH, sl[0], sl[1], sl[2]],
-        type='gaussian',
-        sigma=20 * np.array((1 / spacing_ratio, 1, 1)),
-        mode='reflect',
-        ch_id=ch_dict[FISH_647_CH]
+        sigma=max(max_coo) // 8 * np.array((1 / spacing_ratio, 1, 1)),
     )
-    defloored = data[FISH_647_CH, sl[0], sl[1], sl[2]].astype(
-        'int16') - noise_floor.astype('int16')
-    defloored = np.maximum(defloored, 0).astype('uint8')
-    defloored = contrast_stretch(defloored)
+    # Add to analyzed image for visualziation
+    fish_647_analyzed[sl[0], sl[1], sl[2]] = defloored
+    # Find puncta
     ctrs_647 = detect_blobs(
-        defloored,
+        defloored.astype('float'),
         min_sigma=2,
         max_sigma=10,
         num_sigma=17,
-        threshold=0.2,
+        z_y_x_ratio=(1, 1, 1),
+        threshold=fish_647_threshold
     ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
+    print('Detected {} puncta'.format(len(ctrs_647)))
     detections_647_dfs.append(
         pd.DataFrame(
             ctrs_647,
@@ -515,25 +719,24 @@ for idx, row in nuclei_props_df[nuclei_props_df['keep']].iterrows():
         )
     )
 
-    print("{} channel ".format(ch_dict[FISH_568_CH]))
-    noise_floor = denoise(
+    print("{} channel".format(ch_dict[FISH_568_CH]))
+    # Remove noise floor
+    defloored = remove_floor(
         data[FISH_568_CH, sl[0], sl[1], sl[2]],
-        type='gaussian',
-        sigma=20 * np.array((1 / spacing_ratio, 1, 1)),
-        mode='reflect',
-        ch_id=ch_dict[FISH_647_CH]
+        sigma=max(max_coo) // 8 * np.array((1 / spacing_ratio, 1, 1)),
     )
-    defloored = data[FISH_568_CH, sl[0], sl[1], sl[2]].astype(
-        'int16') - noise_floor.astype('int16')
-    defloored = np.maximum(defloored, 0).astype('uint8')
-    defloored = contrast_stretch(defloored)
+    # Add to analyzed image for visualziation
+    fish_568_analyzed[sl[0], sl[1], sl[2]] = defloored
+    # Find puncta
     ctrs_568 = detect_blobs(
-        defloored,
+        defloored.astype('float'),
         min_sigma=2,
         max_sigma=10,
         num_sigma=17,
-        threshold=0.2,
+        z_y_x_ratio=(1, 1, 1),
+        threshold=fish_568_threshold
     ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
+    print('Datected {} puncta'.format(len(ctrs_568)))
     detections_568_dfs.append(
         pd.DataFrame(
             ctrs_568,
@@ -549,8 +752,28 @@ fish_568_puncta_ctrs_df = pd.concat(detections_568_dfs)
 fish_568_puncta_ctrs_df.reset_index(drop=True, inplace=True)
 fish_568_puncta_ctrs_df.loc[:, 'label'] = range(len(fish_568_puncta_ctrs_df))
 
+# Show analyzed images
+viewer.add_image(
+    fish_647_analyzed,
+    name=ch_dict[FISH_647_CH] + '-analized',
+    colormap="magenta",
+    blending="additive",
+    scale=spacing,
+    interpolation="nearest",
+    visible=False
+)
+viewer.add_image(
+    fish_568_analyzed,
+    name=ch_dict[FISH_568_CH] + '-analized',
+    colormap="magenta",
+    blending="additive",
+    scale=spacing,
+    interpolation="nearest",
+    visible=False
+)
+
 # Select FISH signatures within nuclei
-print("Assigning FISH puncta to nuclei...", end="", flush=True)
+print("Assigning FISH puncta to nuclei:...", end="", flush=True)
 fish_647_puncta_ctrs_df.loc[:, ['keep', 'nucleus']] = False, None
 nuclei_props_df.loc[:, ch_dict[FISH_647_CH] + '_cnt'] = 0
 nuclei_props_df[ch_dict[FISH_647_CH] + '_ids'] = [[]
@@ -558,7 +781,7 @@ nuclei_props_df[ch_dict[FISH_647_CH] + '_ids'] = [[]
 
 for _, row in fish_647_puncta_ctrs_df.iterrows():
     coo = row[['Z', 'Y', 'X']].astype('uint16')
-    label = nuclei_labels_voronoi[coo[0], coo[1], coo[2]]
+    label = nuclei_labels[coo[0], coo[1], coo[2]]
     if label != 0:
         nuclei_props_df.loc[
             nuclei_props_df['label'] == label,
@@ -580,7 +803,7 @@ nuclei_props_df[ch_dict[FISH_568_CH] + '_ids'] = [[]
 
 for _, row in fish_568_puncta_ctrs_df.iterrows():
     coo = row[['Z', 'Y', 'X']].astype('uint16')
-    label = nuclei_labels_voronoi[coo[0], coo[1], coo[2]]
+    label = nuclei_labels[coo[0], coo[1], coo[2]]
     if label != 0:
         nuclei_props_df.loc[
             nuclei_props_df['label'] == label,
@@ -595,17 +818,22 @@ for _, row in fish_568_puncta_ctrs_df.iterrows():
             ['keep', 'nucleus']
         ] = True, label
 
+print("done!")
+
 # Some stats
-print("{} channel".format(ch_dict[FISH_647_CH]))
+print("{} channel:".format(ch_dict[FISH_647_CH]))
 tmp = fish_647_puncta_ctrs_df.loc[fish_647_puncta_ctrs_df['keep']]
-print("{} detected".format(len(tmp)))
-print("sigmas:", tmp[[
-      'sigma_Z', 'sigma_Y', 'sigma_X']].describe())
-print("{} channel".format(ch_dict[FISH_568_CH]))
+print("Detected {} puncta".format(len(tmp)))
+# print("sigmas:", tmp[[
+#       'sigma']].describe())
+print(tmp[['sigma_Z', 'sigma_Y', 'sigma_X']].describe())
+
+print("{} channel:".format(ch_dict[FISH_568_CH]))
 tmp = fish_568_puncta_ctrs_df.loc[fish_568_puncta_ctrs_df['keep']]
-print("{} detected".format(len(tmp)))
-print("sigmas:", tmp[[
-      'sigma_Z', 'sigma_Y', 'sigma_X']].describe())
+print("Detected {} puncta".format(len(tmp)))
+# print("sigmas:", tmp[[
+#       'sigma']].describe())
+print(tmp[['sigma_Z', 'sigma_Y', 'sigma_X']].describe())
 print("done!")
 
 
@@ -616,8 +844,8 @@ viewer.add_points(
         ['Z', 'Y', 'X']
     ].to_numpy(),
     name=ch_dict[FISH_647_CH] + '-puncta',
-    size=5,
-    symbol='disc',
+    size=15,
+    symbol='ring',
     opacity=0.2,
     scale=spacing,
     edge_color='blue',
@@ -633,8 +861,8 @@ viewer.add_points(
         ['Z', 'Y', 'X']
     ].to_numpy(),
     name=ch_dict[FISH_568_CH] + '-puncta',
-    size=5,
-    symbol='disc',
+    size=15,
+    symbol='ring',
     opacity=0.2,
     scale=spacing,
     edge_color='red',
@@ -647,35 +875,61 @@ viewer.add_points(
 print("done!")
 
 # Plot 647 vs 538 for each nucleus
-plt.figure()
-scatter = sbn.scatterplot(
-    nuclei_props_df.loc[nuclei_props_df['keep']],
-    x=ch_dict[FISH_568_CH] + '_cnt',
-    y=ch_dict[FISH_647_CH] + '_cnt',
-)
-
 top = max(nuclei_props_df[ch_dict[FISH_568_CH] + '_cnt'].max(),
           nuclei_props_df[ch_dict[FISH_647_CH] + '_cnt'].max())
-plt.xlim((0, top))
-plt.ylim((0, top))
-plt.title(osp.split(filename)[1])
-plt.axis('square')
-plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
-for _, row in nuclei_props_df.loc[nuclei_props_df['keep']].iterrows():
-    plt.annotate(
-        row['label'],
-        (
-            row[ch_dict[FISH_568_CH] + '_cnt'] + 0.25,
-            row[ch_dict[FISH_647_CH] + '_cnt'] + 0.25
-        )
-    )
+jointplot = sbn.jointplot(
+    data=nuclei_props_df.loc[nuclei_props_df['keep']],
+    x=ch_dict[FISH_568_CH] + '_cnt',
+    y=ch_dict[FISH_647_CH] + '_cnt',
+    kind='hist',
+    ratio=3,
+    xlim=(0, top),
+    ylim=(0, top),
+    marginal_ticks=True,
+    cbar=True
+)
 
+plt.subplots_adjust(left=0.1, right=0.8, top=0.9, bottom=0.1)
+pos_joint_ax = jointplot.ax_joint.get_position()
+pos_marg_x_ax = jointplot.ax_marg_x.get_position()
+jointplot.ax_joint.set_position(
+    [
+        pos_joint_ax.x0,
+        pos_joint_ax.y0,
+        pos_marg_x_ax.width,
+        pos_joint_ax.height
+    ]
+)
+jointplot.fig.axes[-1].set_position(
+    [
+        0.83,
+        pos_joint_ax.y0,
+        0.07,
+        pos_joint_ax.height
+    ]
+)
+file = osp.split(filename)
+plt.suptitle(file[-1])
+plt.xlabel("{} count (thresh: {})".format(
+    ch_dict[FISH_568_CH], fish_568_threshold))
+plt.ylabel("{} count (thresh: {})".format(
+    ch_dict[FISH_647_CH], fish_647_threshold))
 
+# Evaluate which nuclei have a particular FISH count
+nuclei_count_df = nuclei_props_df.groupby(
+    [
+        ch_dict[FISH_568_CH] + '_cnt',
+        ch_dict[FISH_647_CH] + '_cnt'
+    ]
+).agg(list)[['label']].reset_index()
+print("Nuclei with given FISH counts:\n{}".format(nuclei_count_df))
+
+# Save figure
 file = osp.splitext(filename)
 plt.savefig(
     file[0] + "-{}-{}-FISH_plot.pdf".format(
         ch_dict[NUCLEI_CH],
-        data[NUCLEI_CH, ...].shape
+        data[NUCLEI_CH].shape
     ),
     bbox_inches='tight'
 )
@@ -686,197 +940,191 @@ file = osp.splitext(filename)
 nuclei_props_df.to_json(
     file[0] + "-{}-{}-FISH_df.json".format(
         ch_dict[NUCLEI_CH],
-        data[NUCLEI_CH, ...].shape
+        data[NUCLEI_CH].shape
     )
 )
 fish_647_puncta_ctrs_df.to_json(
     file[0] + "-{}-{}-FISH_df.json".format(
         ch_dict[FISH_647_CH],
-        data[FISH_647_CH, ...].shape
+        data[FISH_647_CH].shape
     )
 )
 fish_568_puncta_ctrs_df.to_json(
     file[0] + "-{}-{}-FISH_df.json".format(
         ch_dict[FISH_568_CH],
-        data[FISH_568_CH, ...].shape
+        data[FISH_568_CH].shape
+    )
+)
+nuclei_count_df.to_json(
+    file[0] + "-{}-FISH_count_per_nuclei_df.json".format(
+        data[FISH_568_CH].shape
     )
 )
 print("done!")
 
-
 plt.show()
 napari.run()
 
-# **************************************************************
-# **************************************************************
-# **************************************************************
+
+# # Bounding surfaces for thresholded nuclei
+# print("Evaluating thresholded nuclei's boundaries...", end="", flush=True)
+# nuclei_mask_boundaries = ski_mor.dilation(
+#     nuclei_mask, footprint=ski_mor.ball(1)) ^ nuclei_mask
+# viewer.add_image(
+#     nuclei_mask_boundaries,
+#     opacity=0.5,
+#     scale=spacing,
+#     colormap="red",
+#     blending="additive",
+#     interpolation="nearest",
+#     visible=False
+# )
+# print("done!")
 
 
-# Bounding surfaces for thresholded nuclei
-print("Evaluating thresholded nuclei's boundaries...", end="", flush=True)
-nuclei_mask_boundaries = ski_mor.dilation(
-    nuclei_mask, footprint=ski_mor.ball(1)) ^ nuclei_mask
-viewer.add_image(
-    nuclei_mask_boundaries,
-    opacity=0.5,
-    scale=spacing,
-    colormap="red",
-    blending="additive",
-    interpolation="nearest",
-    visible=False
-)
-print("done!")
+# # TODO: ideas to try to detect center of nuclei:
+# #       - Blurr segmented, find max, watershed with Vornoi boundaries:
+# #         https://github.com/clEsperanto/pyclesperanto_prototype/blob/master/demo/segmentation/Segmentation_3D.ipynb
+# #         https://github.com/clEsperanto/pyclesperanto_prototype/blob/master/demo/segmentation/voronoi_otsu_labeling.ipynb)
+# #       - Gaussian blurr, then 3D Frangi to detect blobness then max of Frangi to detect nuclei
+# #         centers and then use those for watershed.
+# #       - Autocorrelation: cells are about the same size and autocorrelation should peak when
+# #         they overlap. Or use one cell as template and template matching. If we can find the
+# #         centers, we can then use watershed to identify individual cells.
+# #       - Consider a z-by-z segmentation with prior given from neighboring slices.
+# #       - Idea for automated classification: after detecting a few, use a 3x3 block with some classic classification
+# #         method: KNN, SVM, etc. to classify the rest of the image. Use both the original image and the median-filtered
+# #         one to generate the features 3x3 from both. Also other features could include gradient and laplacian of the
+# #         image.
+# #       - You really have to try Random Forest of Extra Tree. Think about a reasonable set of features to use that might
+# #         help identify inside and boundaries. Also check the libraries that are available in Python to extract features
+# #         "Deep learning meets radiomics for end-to-end brain tumor mri analysis" (W. Ponikiewski)
+# #       - Check ICIP2022 paper #1147 (and the following on in the panel - Greek guy)
+# #
+# # # Evaluate and store image properties based on nuclei components
+# # for ch in range(len(channels)):
+# #     comp_props_df = pd.DataFrame(
+# #         ski_mea.regionprops_table(
+# #             nuclei_comp,
+# #             intensity_image=data[ch, ...],
+# #             properties=('label', 'intensity_mean')
+# #         )
+# #     )
+# #     nuclei_props_df = nuclei_props_df.merge(comp_props_df, on='label')
+# #     nuclei_props_df = nuclei_props_df.rename(columns={'intensity_mean': 'intensity_mean_ch{}'.format(channels[ch])})
+
+# # Evaluate nuclei's volume statistics and use to select individual nuclei
+# # NOTE: This only really works, when it works, with the large median filter in x and y.
+# nuclei_min_vol, nuclei_med_vol, nuclei_max_vol = nuclei_props_df['area'].quantile([
+#     0.25, 0.5, 0.75])
+# nuclei_mean = nuclei_props_df['area'].mean()
+# nuclei_std = nuclei_props_df['area'].std()
+# print(" - Volumes quantiles: {}, {}, {}".format(
+#     nuclei_min_vol,
+#     nuclei_med_vol,
+#     nuclei_max_vol
+# )
+# )
+# print(" - Selected volume range: {} - {}".format(
+#     nuclei_min_vol,
+#     nuclei_max_vol)
+# )
+
+# # Show statistics
+# sbn.displot(
+#     nuclei_props_df,
+#     x='area',
+#     kde=True,
+#     rug=True
+# )
+# plt.axvline(nuclei_med_vol, color="red")
+# plt.axvline(nuclei_min_vol, color="red")
+# plt.axvline(nuclei_max_vol, color="red")
+# plt.axvline(nuclei_mean, color="green")
+# plt.axvline(nuclei_mean + nuclei_std, color="green")
+# plt.axvline(nuclei_mean - nuclei_std, color="green")
+
+# plt.figure()
+# sbn.boxplot(
+#     nuclei_props_df,
+#     x='area',
+#     notch=True,
+#     showcaps=False
+# )
+
+# # Remove large and small components based on percentiles
+# print(" - Removing unwanted nuclei connected components...", end="", flush=True)
+# nuclei_props_df.loc[:, 'keep'] = False
+# qry = 'area > ' + str(nuclei_min_vol) + ' & area < ' + str(nuclei_max_vol)
+# mask = nuclei_props_df.query(qry).index
+# nuclei_props_df.loc[mask, 'keep'] = True
+
+# # Generate the cleaned nuclei bool mask and the labeled components
+# nuclei_mask_cleaned = nuclei_mask.copy()
+# for _, row in nuclei_props_df[nuclei_props_df['keep'] == False].iterrows():
+#     nuclei_mask_cleaned[nuclei_comp == row['label']] = False
+
+# viewer.add_image(
+#     nuclei_mask_cleaned,
+#     scale=spacing,
+#     opacity=0.5,
+#     colormap="blue",
+#     blending="additive",
+#     interpolation="nearest",
+#     visible=False
+# )
+# print("done!")
+
+# print("Nuclei's dataframe:\n", nuclei_props_df)
+
+# # Bounding surfaces for uniquely detected nuclei
+# print("Evaluating uniquely detected nuclei's boundaries...", end="", flush=True)
+# nuclei_mask_cleaned_boundaries = ski_mor.dilation(
+#     nuclei_mask_cleaned, footprint=ski_mor.ball(1)) ^ nuclei_mask_cleaned
+# viewer.add_image(
+#     nuclei_mask_cleaned_boundaries,
+#     opacity=0.5,
+#     scale=spacing,
+#     colormap="red",
+#     blending="additive",
+#     interpolation="nearest",
+#     visible=False
+# )
+# print("done!")
+
+# # Mask original nuclei channel
+# print("Masking nuclei channel...", end="", flush=True)
+# nuclei_masked = data[NUCLEI_CH].copy()
+# nuclei_masked[nuclei_mask_cleaned == False] = 0
+# viewer.add_image(
+#     nuclei_masked,
+#     scale=spacing,
+#     opacity=1,
+#     colormap="green",
+#     blending="additive",
+#     interpolation="nearest",
+#     visible=False
+# )
+# print("done!")
+
+# # Mask original labels
+# print("Masking nuclei connected components...", end="", flush=True)
+# # nuclei_labels = ski_mea.label(nuclei_mask_cleaned)
+# nuclei_labels = nuclei_comp.copy()
+# nuclei_labels[nuclei_mask_cleaned == False] = 0
+# viewer.add_labels(
+#     nuclei_labels,
+#     scale=spacing,
+#     blending="additive",
+#     visible=False
+# )
+# print("done!")
 
 
-# TODO: ideas to try to detect center of nuclei:
-#       - Blurr segmented, find max, watershed with Vornoi boundaries:
-#         https://github.com/clEsperanto/pyclesperanto_prototype/blob/master/demo/segmentation/Segmentation_3D.ipynb
-#         https://github.com/clEsperanto/pyclesperanto_prototype/blob/master/demo/segmentation/voronoi_otsu_labeling.ipynb)
-#       - Gaussian blurr, then 3D Frangi to detect blobness then max of Frangi to detect nuclei
-#         centers and then use those for watershed.
-#       - Autocorrelation: cells are about the same size and autocorrelation should peak when
-#         they overlap. Or use one cell as template and template matching. If we can find the
-#         centers, we can then use watershed to identify individual cells.
-#       - Consider a z-by-z segmentation with prior given from neighboring slices.
-#       - Idea for automated classification: after detecting a few, use a 3x3 block with some classic classification
-#         method: KNN, SVM, etc. to classify the rest of the image. Use both the original image and the median-filtered
-#         one to generate the features 3x3 from both. Also other features could include gradient and laplacian of the
-#         image.
-#       - You really have to try Random Forest of Extra Tree. Think about a reasonable set of features to use that might
-#         help identify inside and boundaries. Also check the libraries that are available in Python to extract features
-#         "Deep learning meets radiomics for end-to-end brain tumor mri analysis" (W. Ponikiewski)
-#       - Check ICIP2022 paper #1147 (and the following on in the panel - Greek guy)
-#
-# # Evaluate and store image properties based on nuclei components
-# for ch in range(len(channels)):
-#     comp_props_df = pd.DataFrame(
-#         ski_mea.regionprops_table(
-#             nuclei_comp,
-#             intensity_image=data[ch, ...],
-#             properties=('label', 'intensity_mean')
-#         )
-#     )
-#     nuclei_props_df = nuclei_props_df.merge(comp_props_df, on='label')
-#     nuclei_props_df = nuclei_props_df.rename(columns={'intensity_mean': 'intensity_mean_ch{}'.format(channels[ch])})
-
-# Evaluate nuclei's volume statistics and use to select individual nuclei
-# NOTE: This only really works, when it works, with the large median filter in x and y.
-nuclei_min_vol, nuclei_med_vol, nuclei_max_vol = nuclei_props_df['area'].quantile([
-    0.25, 0.5, 0.75])
-nuclei_mean = nuclei_props_df['area'].mean()
-nuclei_std = nuclei_props_df['area'].std()
-print(" - Volumes quantiles: {}, {}, {}".format(
-    nuclei_min_vol,
-    nuclei_med_vol,
-    nuclei_max_vol
-)
-)
-print(" - Selected volume range: {} - {}".format(
-    nuclei_min_vol,
-    nuclei_max_vol)
-)
-
-# Show statistics
-sbn.displot(
-    nuclei_props_df,
-    x='area',
-    kde=True,
-    rug=True
-)
-plt.axvline(nuclei_med_vol, color="red")
-plt.axvline(nuclei_min_vol, color="red")
-plt.axvline(nuclei_max_vol, color="red")
-plt.axvline(nuclei_mean, color="green")
-plt.axvline(nuclei_mean + nuclei_std, color="green")
-plt.axvline(nuclei_mean - nuclei_std, color="green")
-
-plt.figure()
-sbn.boxplot(
-    nuclei_props_df,
-    x='area',
-    notch=True,
-    showcaps=False
-)
-
-# Remove large and small components based on percentiles
-print(" - Removing unwanted nuclei connected components...", end="", flush=True)
-nuclei_props_df.loc[:, 'keep'] = False
-qry = 'area > ' + str(nuclei_min_vol) + ' & area < ' + str(nuclei_max_vol)
-mask = nuclei_props_df.query(qry).index
-nuclei_props_df.loc[mask, 'keep'] = True
-
-# Generate the cleaned nuclei bool mask and the labeled components
-nuclei_mask_cleaned = nuclei_mask.copy()
-for _, row in nuclei_props_df[nuclei_props_df['keep'] == False].iterrows():
-    nuclei_mask_cleaned[nuclei_comp == row['label']] = False
-
-viewer.add_image(
-    nuclei_mask_cleaned,
-    scale=spacing,
-    opacity=0.5,
-    colormap="blue",
-    blending="additive",
-    interpolation="nearest",
-    visible=False
-)
-print("done!")
-
-print("Nuclei's dataframe:\n", nuclei_props_df)
-
-# Bounding surfaces for uniquely detected nuclei
-print("Evaluating uniquely detected nuclei's boundaries...", end="", flush=True)
-nuclei_mask_cleaned_boundaries = ski_mor.dilation(
-    nuclei_mask_cleaned, footprint=ski_mor.ball(1)) ^ nuclei_mask_cleaned
-viewer.add_image(
-    nuclei_mask_cleaned_boundaries,
-    opacity=0.5,
-    scale=spacing,
-    colormap="red",
-    blending="additive",
-    interpolation="nearest",
-    visible=False
-)
-print("done!")
-
-# Mask original nuclei channel
-print("Masking nuclei channel...", end="", flush=True)
-nuclei_masked = data[NUCLEI_CH].copy()
-nuclei_masked[nuclei_mask_cleaned == False] = 0
-viewer.add_image(
-    nuclei_masked,
-    scale=spacing,
-    opacity=1,
-    colormap="green",
-    blending="additive",
-    interpolation="nearest",
-    visible=False
-)
-print("done!")
-
-# Mask original labels
-print("Masking nuclei connected components...", end="", flush=True)
-# nuclei_labels = ski_mea.label(nuclei_mask_cleaned)
-nuclei_labels = nuclei_comp.copy()
-nuclei_labels[nuclei_mask_cleaned == False] = 0
-viewer.add_labels(
-    nuclei_labels,
-    scale=spacing,
-    blending="additive",
-    visible=False
-)
-print("done!")
-
-
-################################################################################
-# Hack to be removed: Dilate preserved nuclei labels to identify nearby puncta
-# nuclei_labels = ski_mor.dilation(nuclei_labels, footprint=ski_mor.ball(3))
-################################################################################
-
-
-# TODO: Software to check:
-#        - CellProfiler (https://cellprofiler.org/)
-#        - CellSegm (https://scfbm.biomedcentral.com/articles/10.1186/1751-0473-8-16)
-#        - SMMF algorithm (https://ieeexplore.ieee.org/document/4671118)
-#        - Imaris methods
-#        - 3D UNET, nnUNET
-#        - pyradiomics (https://pyradiomics.readthedocs.io/en/latest/index.html) for feature extraction
+# # TODO: Software to check:
+# #        - CellProfiler (https://cellprofiler.org/)
+# #        - CellSegm (https://scfbm.biomedcentral.com/articles/10.1186/1751-0473-8-16)
+# #        - SMMF algorithm (https://ieeexplore.ieee.org/document/4671118)
+# #        - Imaris methods
+# #        - 3D UNET, nnUNET
+# #        - pyradiomics (https://pyradiomics.readthedocs.io/en/latest/index.html) for feature extraction
