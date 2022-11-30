@@ -253,19 +253,14 @@ def analyze_image(filename=None, visualize=False):
     # data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
     # -------------------------------------
 
-    # Process each channel:
-    # - remove the floor
-    # - contrast stretch
-    # - convert to uint8
+    # Contrast stretch each channel
     for ch in range(data.shape[0]):
         print("Processing channel {}:".format(ch_dict[ch]))
-        channel = data[ch].astype("float")
-        noise_floor = sci_ndi.gaussian_filter(
-            channel, 100 * np.asarray((1 / spacing_ratio, 1, 1)), mode="reflect"
-        )
-        defloored = np.maximum(channel - noise_floor, 0)
-        stretched = ski_exp.rescale_intensity(defloored, out_range=(0, 255))
-        data[ch] = stretched.astype("uint8")
+        data[ch] = contrast_stretch(data[ch])
+
+    # If needed, convert to uint8
+    if data.dtype != "uint8":
+        data = uint16_to_uint8(data)
 
     if visualize:
         # Show original data
