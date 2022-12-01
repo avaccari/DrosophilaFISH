@@ -253,7 +253,7 @@ def analyze_image(filename=None, visualize=False):
     # data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
     # -------------------------------------
 
-    # Contrast stretch each channel
+    # Contrast stretch
     for ch in range(data.shape[0]):
         print("Processing channel {}:".format(ch_dict[ch]))
         data[ch] = contrast_stretch(data[ch])
@@ -261,6 +261,17 @@ def analyze_image(filename=None, visualize=False):
     # If needed, convert to uint8
     if data.dtype != "uint8":
         data = uint16_to_uint8(data)
+
+    # Remove floor from each channel and contrast stretch
+    for ch in range(data.shape[0]):
+        print("Processing channel {}:".format(ch_dict[ch]))
+        data[ch] = remove_floor(
+            data[ch],
+            sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
+            filename_root=filename,
+            ch_id=ch_dict[ch],
+        )
+        data[ch] = contrast_stretch(data[ch])
 
     if visualize:
         # Show original data
@@ -273,25 +284,6 @@ def analyze_image(filename=None, visualize=False):
             blending="additive",
             scale=spacing,
             depiction="volume",
-            interpolation="nearest",
-            visible=False,
-        )
-
-    # Remove background noise from nuclei channel
-    print("Removing floor from nuclei's channel:")
-    nuclei_defloored = remove_floor(
-        data[NUCLEI_CH],
-        sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
-        filename_root=filename,
-        ch_id=ch_dict[NUCLEI_CH],
-    )
-    if visualize:
-        viewer.add_image(
-            nuclei_defloored,
-            name=ch_dict[NUCLEI_CH] + "-deflo",
-            colormap="magenta",
-            blending="additive",
-            scale=spacing,
             interpolation="nearest",
             visible=False,
         )
@@ -317,7 +309,7 @@ def analyze_image(filename=None, visualize=False):
     # Apply median filter to denoise the nuclei channel
     print("Denoising nuclei's channel:")
     nuclei_den = filter(
-        nuclei_defloored,
+        data[NUCLEI_CH],
         footprint=ski_mor.ball(7)[3::4],
         filename_root=filename,
         ch_id=ch_dict[NUCLEI_CH],  # ! We removed the stretch
@@ -493,29 +485,10 @@ def analyze_image(filename=None, visualize=False):
 
     # If cytoplasm channel exists, use it
     if data.shape[0] == 4:
-        # Remove background noise from cytoplasm channel
-        print("Removing floor from cytoplasm's channel:")
-        cyto_defloored = remove_floor(
-            data[CYTO_CH],
-            sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
-            filename_root=filename,
-            ch_id=ch_dict[CYTO_CH],
-        )
-        if visualize:
-            viewer.add_image(
-                cyto_defloored,
-                name=ch_dict[CYTO_CH] + "-deflo",
-                colormap="magenta",
-                blending="additive",
-                scale=spacing,
-                interpolation="nearest",
-                visible=False,
-            )
-
         # Apply median filter to denoise the cytoplasm channel
         print("Denoising cytoplasm's channel:")
         cyto_den = filter(
-            cyto_defloored,
+            data[CYTO_CH],
             footprint=ski_mor.ball(7)[3::4],
             filename_root=filename,
             ch_id=ch_dict[CYTO_CH],
@@ -752,16 +725,11 @@ def analyze_image(filename=None, visualize=False):
 
         # Find blob location within the bbox, mask, and shift coordinates
         print("{} channel".format(ch_dict[FISH_647_CH]))
-        # Remove noise floor
-        defloored = remove_floor(
-            data[FISH_647_CH, sl[0], sl[1], sl[2]],
-            sigma=max(max_coo) // 8 * np.array((1 / spacing_ratio, 1, 1)),
-        )
         # Add to analyzed image for visualziation
-        fish_647_analyzed[sl[0], sl[1], sl[2]] = defloored
+        fish_647_analyzed[sl[0], sl[1], sl[2]] = data[FISH_647_CH, sl[0], sl[1], sl[2]]
         # Find puncta
         ctrs_647 = detect_blobs(
-            defloored.astype("float"),
+            data[FISH_647_CH, sl[0], sl[1], sl[2]].astype("float"),
             min_sigma=2,
             max_sigma=10,
             num_sigma=17,
@@ -776,16 +744,11 @@ def analyze_image(filename=None, visualize=False):
         )
 
         print("{} channel".format(ch_dict[FISH_568_CH]))
-        # Remove noise floor
-        defloored = remove_floor(
-            data[FISH_568_CH, sl[0], sl[1], sl[2]],
-            sigma=max(max_coo) // 8 * np.array((1 / spacing_ratio, 1, 1)),
-        )
         # Add to analyzed image for visualziation
-        fish_568_analyzed[sl[0], sl[1], sl[2]] = defloored
+        fish_568_analyzed[sl[0], sl[1], sl[2]] = data[FISH_568_CH, sl[0], sl[1], sl[2]]
         # Find puncta
         ctrs_568 = detect_blobs(
-            defloored.astype("float"),
+            data[FISH_568_CH, sl[0], sl[1], sl[2]].astype("float"),
             min_sigma=2,
             max_sigma=10,
             num_sigma=17,
@@ -962,7 +925,7 @@ def analyze_image(filename=None, visualize=False):
     file = osp.splitext(filename)
     plt.savefig(
         file[0]
-        + "-{}-{}-FISH_plot.pdf".format(ch_dict[NUCLEI_CH], data[NUCLEI_CH].shape),
+        + f"-{ch_dict[NUCLEI_CH]}-{data[NUCLEI_CH].shape}-FISH-({fish_568_threshold}, {fish_647_threshold})-plot.pdf",
         bbox_inches="tight",
     )
 
@@ -970,19 +933,16 @@ def analyze_image(filename=None, visualize=False):
     print("Saving the nuclei's and puncta's property dataframes...", end="", flush=True)
     file = osp.splitext(filename)
     nuclei_props_df.to_json(
-        file[0]
-        + "-{}-{}-FISH_df.json".format(ch_dict[NUCLEI_CH], data[NUCLEI_CH].shape)
+        file[0] + f"-{ch_dict[NUCLEI_CH]}-{data[NUCLEI_CH].shape}-FISH-df.json"
     )
     fish_647_puncta_ctrs_df.to_json(
-        file[0]
-        + "-{}-{}-FISH_df.json".format(ch_dict[FISH_647_CH], data[FISH_647_CH].shape)
+        file[0] + f"-{ch_dict[FISH_647_CH]}-{data[FISH_647_CH].shape}-FISH-df.json"
     )
     fish_568_puncta_ctrs_df.to_json(
-        file[0]
-        + "-{}-{}-FISH_df.json".format(ch_dict[FISH_568_CH], data[FISH_568_CH].shape)
+        file[0] + f"-{ch_dict[FISH_568_CH]}-{data[FISH_568_CH].shape}-FISH-df.json"
     )
     nuclei_count_df.to_json(
-        file[0] + "-{}-FISH_count_per_nuclei_df.json".format(data[FISH_568_CH].shape)
+        file[0] + f"-{data[FISH_568_CH].shape}-FISH_count_per_nuclei-df.json"
     )
     print("done!")
 
