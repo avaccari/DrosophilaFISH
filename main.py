@@ -816,7 +816,43 @@ def analyze_image(filename=None, visualize=False):
 
             print(f"Detected {len(df)} puncta")
 
-        # Combine detections for this threshold
+            # Find 568 blobs locations within the bbox, mask, and shift coordinates
+            print(f"{ch_dict[FISH_568_CH]} channel")
+            ctrs = detect_blobs(
+                fish_568_to_analyze[sl[0], sl[1], sl[2]].astype("float"),
+                min_sigma=2,
+                max_sigma=2,
+                num_sigma=1,
+                z_y_x_ratio=(1 / spacing_ratio, 1, 1),
+                threshold=fish_568_threshold,
+            ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
+
+            df = pd.DataFrame(
+                ctrs, columns=["Z", "Y", "X", "sigma_Z", "sigma_Y", "sigma_X"]
+            )
+
+            if not df.empty:
+                # Drop detections that are not inside this particular nucleus
+                df.loc[:, "keep"] = False
+                for idx, row in df.iterrows():
+                    coo = row[["Z", "Y", "X"]].astype("uint16")
+                    label = nuclei_labels[coo[0], coo[1], coo[2]]
+                    if label != 0 and label == lbl:
+                        df.at[idx, "keep"] = True
+                df = df[df["keep"]].drop(columns=["keep"])
+
+                # If multiple nuclei regions with same label, concatenate detections
+                if lbl in detections_568_at_thrs.keys():
+                    df = pd.concat([detections_568_at_thrs[lbl], df], ignore_index=True)
+
+                # If the dataframe is not empty, assign the nucleus label
+                if not df.empty:
+                    df.loc[:, "nucleus"] = lbl
+                    detections_568_at_thrs[lbl] = df
+
+            print(f"Detected {len(df)} puncta")
+
+        # Combine 647 detections for this threshold
         detections_647_at_thrs_df = pd.concat(
             detections_647_at_thrs.values(), ignore_index=True
         )
@@ -827,7 +863,7 @@ def analyze_image(filename=None, visualize=False):
             1, len(detections_647_at_thrs_df) + 1
         )
 
-        # Combine in overall detection dataframe
+        # Combine in overall 647 detection dataframe
         if fish_647_puncta_df.empty:
             fish_647_puncta_df = detections_647_at_thrs_df.copy()
         else:
@@ -846,8 +882,8 @@ def analyze_image(filename=None, visualize=False):
                     fish_647_puncta_df["label"] == row["label"], "thresholds"
                 ].iat[0] += [fish_647_threshold]
 
-        # Create a dataframe with the detections for the current threhsolds and
-        # merge with nuclei info
+        # Create a dataframe with the 647 detections for the current threhsolds
+        # and merge with nuclei info
         props_df = pd.merge(
             detections_647_at_thrs_df.groupby("nucleus", as_index=False).size(),
             detections_647_at_thrs_df.groupby("nucleus", as_index=False).agg(list)[
@@ -862,7 +898,53 @@ def analyze_image(filename=None, visualize=False):
             }
         )
         nuclei_props_df = nuclei_props_df.merge(props_df, on="label", how="left")
-        ##################################
+
+        # Combine 568 detections for this threshold
+        detections_568_at_thrs_df = pd.concat(
+            detections_568_at_thrs.values(), ignore_index=True
+        )
+        detections_568_at_thrs_df["thresholds"] = [
+            [fish_568_threshold] for _ in range(len(detections_568_at_thrs_df))
+        ]
+        detections_568_at_thrs_df.loc[:, "label"] = range(
+            1, len(detections_568_at_thrs_df) + 1
+        )
+
+        # Combine in overall 568 detection dataframe
+        if fish_568_puncta_df.empty:
+            fish_568_puncta_df = detections_568_at_thrs_df.copy()
+        else:
+            # Match new detection with closest from existing puncta
+            fish_568_tree = sci_spa.KDTree(
+                fish_568_puncta_df.loc[:, ["Z", "Y", "X"]].to_numpy()
+                * (spacing_ratio, 1, 1)
+            )
+            closest_detection = fish_568_tree.query(
+                detections_568_at_thrs_df.loc[:, ["Z", "Y", "X"]].to_numpy()
+                * (spacing_ratio, 1, 1)
+            )
+            detections_568_at_thrs_df.loc[:, "label"] = closest_detection[1] + 1
+            for _, row in detections_568_at_thrs_df.iterrows():
+                fish_568_puncta_df.loc[
+                    fish_568_puncta_df["label"] == row["label"], "thresholds"
+                ].iat[0] += [fish_568_threshold]
+
+        # Create a dataframe with the 568 detections for the current threhsolds
+        # and merge with nuclei info
+        props_df = pd.merge(
+            detections_568_at_thrs_df.groupby("nucleus", as_index=False).size(),
+            detections_568_at_thrs_df.groupby("nucleus", as_index=False).agg(list)[
+                ["nucleus", "label"]
+            ],
+            on="nucleus",
+        ).rename(
+            columns={
+                "nucleus": "label",
+                "size": ch_dict[FISH_568_CH] + f"_cnt_{fish_568_threshold:03}",
+                "label": ch_dict[FISH_568_CH] + f"_ids_{fish_568_threshold:03}",
+            }
+        )
+        nuclei_props_df = nuclei_props_df.merge(props_df, on="label", how="left")
 
     print("hello!")
     input()
