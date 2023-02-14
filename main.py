@@ -1,24 +1,31 @@
-from tkinter import filedialog
-from aicsimageio import AICSImage
-import napari
-import numpy as np
-import scipy.ndimage as sci_ndi
-import scipy.spatial as sci_spa
-import scipy.stats as sci_sta
-import skimage.filters as ski_fil
-import skimage.filters.rank as ski_fil_ran
-import skimage.exposure as ski_exp
-import skimage.measure as ski_mea
-import skimage.feature as ski_fea
-import skimage.morphology as ski_mor
-import skimage.segmentation as ski_seg
-import skimage.io as ski_io
-import seaborn as sbn
-import matplotlib.pyplot as plt
+import argparse
+import json
 import os
 import os.path as osp
+from tkinter import filedialog
+
+import matplotlib.pyplot as plt
+import napari
+import numpy as np
 import pandas as pd
-import json
+import scipy.ndimage as sci_ndi
+import scipy.spatial as sci_spa
+import seaborn as sbn
+import skimage.exposure as ski_exp
+import skimage.feature as ski_fea
+import skimage.filters as ski_fil
+import skimage.filters.rank as ski_fil_ran
+import skimage.io as ski_io
+import skimage.measure as ski_mea
+import skimage.morphology as ski_mor
+import skimage.segmentation as ski_seg
+from magicgui import magicgui
+
+from image import Image
+
+#! IMPORTANT FOR CONSISTENCY: add a flag so that if there is an exception with a
+#! file, all the following one are re-evaluated.
+#! Check the "refresh" argument of the analyze_image() function.
 
 
 def contrast_stretch(data):
@@ -40,11 +47,40 @@ def build_path(filename_root, suffix=None):
     dir, file = osp.split(filename_root)
     file_name, _ = osp.splitext(file)
     root_dir = osp.join(dir, file_name)
-    if suffix is None:
-        return root_dir
-    else:
-        file_out = osp.join(root_dir, file_name + suffix)
-        return file_out
+    return root_dir if suffix is None else osp.join(root_dir, file_name + suffix)
+
+
+def load_metadata(filename_root, sec_data=None):
+    file = build_path(filename_root, "-meta.json")
+    try:
+        with open(file) as meta_file:
+            meta_data = json.load(meta_file)
+            return meta_data if sec_data is None else meta_data[sec_data]
+    except FileNotFoundError:
+        print("WARNING: Metadata file not found!")
+        return None
+    except json.decoder.JSONDecodeError:
+        print("WARNING: Metadata file is not in the correct format!")
+        return None
+    except KeyError:
+        print(f"WARNING: Section {sec_data} not found in metadata file!")
+        return {}
+
+
+def save_metadata(filename_root, sec_name=None, sec_data=None):
+    file = build_path(filename_root, "-meta.json")
+    try:
+        root_dir = build_path(filename_root)
+        if not osp.isdir(root_dir):
+            os.makedirs(root_dir)
+        with open(file, "w") as meta_file:
+            if meta_data is None:
+                meta_data = {sec_name: sec_data}
+            else:
+                meta_data[sec_name] = sec_data
+            json.dump(meta_data, meta_file)
+    except OSError:
+        print("WARNING: Issues opening the metadata file!")
 
 
 def filter(
@@ -65,76 +101,64 @@ def filter(
 
     if footprint is None:
         footprint = ski_mor.ball(1)
-        footprint_dim = footprint.shape
-    else:
-        footprint_dim = footprint.shape
-
+    footprint_dim = footprint.shape
     print(f"Applying {type} filter...", end="", flush=True)
 
     if filename_root is None:
-        if type == "median":
+        if type == "closing":
+            filtered = ski_mor.closing(data, footprint=footprint)
+        elif type == "gaussian":
+            filtered = sci_ndi.gaussian_filter(data, mode=mode, cval=cval, sigma=sigma)
+        elif type == "maximum":
+            filtered = ski_fil_ran.maximum(data, footprint=footprint)
+        elif type == "median":
             filtered = sci_ndi.median_filter(
                 data, mode=mode, cval=cval, footprint=footprint
             )
-        elif type == "gaussian":
-            filtered = sci_ndi.gaussian_filter(data, mode=mode, cval=cval, sigma=sigma)
-        elif type == "closing":
-            filtered = ski_mor.closing(data, footprint=footprint)
-        elif type == "maximum":
-            filtered = ski_fil_ran.maximum(data, footprint=footprint)
-        else:
-            pass
+    elif ch_id is None:
+        print(
+            "WARNING: a ch_id should be provided to identify the channel. The data was not filtered."
+        )
     else:
-        if ch_id is None:
-            print(
-                "WARNING: a ch_id should be provided to identify the channel. The data was not filtered."
+        if type == "closing":
+            file = build_path(
+                filename_root,
+                f"-{ch_id}-clos-{footprint_dim}.npy",
             )
-        else:
-            if type == "median":
-                file = build_path(
-                    filename_root, f"-{ch_id}-den-med-{footprint_dim}.npy"
-                )
+        elif type == "gaussian":
+            file = build_path(
+                filename_root,
+                f"-{ch_id}-den-gaus-{tuple(np.round(sigma, decimals=2))}.npy",
+            )
+        elif type == "maximum":
+            file = build_path(
+                filename_root,
+                f"-{ch_id}-max-{footprint_dim}.npy",
+            )
+        elif type == "median":
+            file = build_path(filename_root, f"-{ch_id}-den-med-{footprint_dim}.npy")
+        try:
+            filtered = np.load(file)
+        except (FileNotFoundError, ValueError):
+            if type == "closing":
+                filtered = ski_mor.closing(data, footprint=footprint)
             elif type == "gaussian":
-                file = build_path(
-                    filename_root,
-                    f"-{ch_id}-den-gaus-{tuple(np.round(sigma, decimals=2))}.npy",
-                )
-            elif type == "closing":
-                file = build_path(
-                    filename_root,
-                    f"-{ch_id}-clos-{footprint_dim}.npy",
+                filtered = sci_ndi.gaussian_filter(
+                    data, mode=mode, cval=cval, sigma=sigma
                 )
             elif type == "maximum":
-                file = build_path(
-                    filename_root,
-                    f"-{ch_id}-max-{footprint_dim}.npy",
+                filtered = ski_fil_ran.maximum(data, footprint=footprint)
+            elif type == "median":
+                filtered = sci_ndi.median_filter(
+                    data, mode=mode, cval=cval, footprint=footprint
                 )
-            else:
-                pass
             try:
-                filtered = np.load(file)
-            except FileNotFoundError:
-                if type == "median":
-                    filtered = sci_ndi.median_filter(
-                        data, mode=mode, cval=cval, footprint=footprint
-                    )
-                elif type == "gaussian":
-                    filtered = sci_ndi.gaussian_filter(
-                        data, mode=mode, cval=cval, sigma=sigma
-                    )
-                elif type == "closing":
-                    filtered = ski_mor.closing(data, footprint=footprint)
-                elif type == "maximum":
-                    filtered = ski_fil_ran.maximum(data, footprint=footprint)
-                else:
-                    pass
-                try:
-                    root_dir = build_path(filename_root)
-                    if not osp.isdir(root_dir):
-                        os.makedirs(root_dir)
-                    np.save(file, filtered)
-                except:
-                    print("WARNING: error saving the file.")
+                root_dir = build_path(filename_root)
+                if not osp.isdir(root_dir):
+                    os.makedirs(root_dir)
+                np.save(file, filtered)
+            except:
+                print("WARNING: error saving the file.")
     print("done!")
 
     if stretch:
@@ -177,126 +201,304 @@ def detect_blobs(
             overlap=overlap,
             exclude_border=True,
         )
+    elif ch_id is None:
+        print(
+            "WARNING: a ch_id should be provided to identify the channel. Blobs were not detected."
+        )
     else:
-        if ch_id is None:
-            print(
-                "WARNING: a ch_id should be provided to identify the channel. Blobs were not detected."
+        file = build_path(filename_root, f"-{ch_id}-blb.npy")
+        try:
+            blobs_ctrs = np.load(file)
+        except FileNotFoundError:
+            blobs_ctrs = ski_fea.blob_log(
+                data,
+                min_sigma=min_sigma,
+                max_sigma=max_sigma,
+                num_sigma=num_sigma,
+                threshold=threshold,
+                exclude_border=True,
             )
-        else:
-            file = build_path(filename_root, f"-{ch_id}-blb.npy")
             try:
-                blobs_ctrs = np.load(file)
-            except FileNotFoundError:
-                blobs_ctrs = ski_fea.blob_log(
-                    data,
-                    min_sigma=min_sigma,
-                    max_sigma=max_sigma,
-                    num_sigma=num_sigma,
-                    threshold=threshold,
-                    exclude_border=True,
-                )
-                try:
-                    root_dir = build_path(filename_root)
-                    if not osp.isdir(root_dir):
-                        os.makedirs(root_dir)
-                    np.save(file, blobs_ctrs)
-                except:
-                    print("WARNING: error saving the file.")
+                root_dir = build_path(filename_root)
+                if not osp.isdir(root_dir):
+                    os.makedirs(root_dir)
+                np.save(file, blobs_ctrs)
+            except:
+                print("WARNING: error saving the file.")
     print("done!")
 
     return blobs_ctrs
 
 
-def load_metadata(filename_root, sec_data=None):
-    file = build_path(filename_root, "-meta.json")
-    try:
-        with open(file) as meta_file:
-            meta_data = json.load(meta_file)
-            if sec_data is None:
-                return meta_data
-            else:
-                return meta_data[sec_data]
-    except OSError:
-        print("WARNING: Metadata file not found!")
-        return None
-    except json.decoder.JSONDecodeError:
-        print("WARNING: Metadata file is not in the correct format!")
-        return None
-    except KeyError:
-        print(f"WARNING: Section {sec_data} not found in metadata file!")
-        return {}
+def _evaluate_voronoi(mask, markers, spacing=(1, 1, 1)):
+    markers_tree = sci_spa.KDTree(markers * spacing)
+    mask_idx = mask.nonzero()
+    mask_idx_array = np.vstack(mask_idx).T
+    closest_marker = markers_tree.query(mask_idx_array * spacing)
+    labels = np.zeros_like(mask, dtype="uint16")
+    # The +1 is to start the labels at 1 instead of 0
+    labels[mask_idx[0], mask_idx[1], mask_idx[2]] = closest_marker[1] + 1
 
-
-def save_metadata(filename_root, sec_name=None, sec_data=None):
-    file = build_path(filename_root, "-meta.json")
-    try:
-        root_dir = build_path(filename_root)
-        if not osp.isdir(root_dir):
-            os.makedirs(root_dir)
-        with open(file, "w") as meta_file:
-            if meta_data is None:
-                meta_data = {sec_name: sec_data}
-            else:
-                meta_data[sec_name] = sec_data
-            json.dump(meta_data, meta_file)
-    except OSError:
-        print("WARNING: Issues opening the metadata file!")
+    return labels
 
 
 def evaluate_voronoi(mask, markers, spacing=(1, 1, 1), filename_root=None, ch_id=None):
     # Find the equivalent to Voronoi regions in the provided mask based on the
     # provided markers
     # Coordinates are normalized to the physical size using 'spacing'
-    print("Identifying Voronoi regions within mask...", end="", flush=True)
+    print("Identifying regions within mask with Vornoi...", end="", flush=True)
     if filename_root is None:
-        markers_tree = sci_spa.KDTree(markers * spacing)
-        mask_idx = mask.nonzero()
-        mask_idx_array = np.vstack(mask_idx).T
-        closest_marker = markers_tree.query(mask_idx_array * spacing)
-        labels = np.zeros_like(mask, dtype="uint16")
-        # The +1 is to start the labels at 1 instead of 0
-        labels[mask_idx[0], mask_idx[1], mask_idx[2]] = closest_marker[1] + 1
+        labels = _evaluate_voronoi(mask, markers, spacing)
+    elif ch_id is None:
+        raise ValueError(
+            "A ch_id should be provided to identify the channel. Vornoi regions were not evaluated."
+        )
     else:
-        if ch_id is None:
-            print(
-                "WARNING: a ch_id should be provided to identify the channel. Blobs were not detected."
-            )
-        else:
-            file = build_path(filename_root, f"-{ch_id}-voronoi.npy")
+        file = build_path(filename_root, f"-{ch_id}-voronoi.npy")
+        try:
+            labels = np.load(file)
+        except (FileNotFoundError, ValueError):
+            labels = _evaluate_voronoi(mask, markers, spacing)
             try:
-                labels = np.load(file)
-            except FileNotFoundError:
-                markers_tree = sci_spa.KDTree(markers * spacing)
-                mask_idx = mask.nonzero()
-                mask_idx_array = np.vstack(mask_idx).T
-                closest_marker = markers_tree.query(mask_idx_array * spacing)
-                labels = np.zeros_like(mask, dtype="uint16")
-                # The +1 is to start the labels at 1 instead of 0
-                labels[mask_idx[0], mask_idx[1], mask_idx[2]] = closest_marker[1] + 1
-                try:
-                    root_dir = build_path(filename_root)
-                    if not osp.isdir(root_dir):
-                        os.makedirs(root_dir)
-                    np.save(file, labels)
-                except:
-                    print("WARNING: error saving the file.")
+                root_dir = build_path(filename_root)
+                if not osp.isdir(root_dir):
+                    os.makedirs(root_dir)
+                np.save(file, labels)
+            except:
+                print("WARNING: error saving the file.")
 
     print("done!")
 
     return labels
 
 
-def analyze_image(filename=None, visualize=False):
+def _evaluate_watershed(mask, markers):
+    # Create the markers
+    mask_img = np.zeros_like(mask, dtype="uint16")
+    mask_img[
+        markers[:, 0].astype("uint16"),
+        markers[:, 1].astype("uint16"),
+        markers[:, 2].astype("uint16"),
+    ] = range(1, 1 + len(markers))
+
+    # Remove markers that are not contained in the nuclei's mask
+    mask_img_clean = mask_img & 65535 * mask.astype("uint16")
+
+    return ski_seg.watershed(mask, mask_img_clean, mask=mask, compactness=0).astype(
+        "uint16"
+    )
+
+
+def evaluate_watershed(mask, markers, filename_root=None, ch_id=None):
+    # Use watershed to identify regions connected to the nuclei centers
+    print("Identifying regions within mask with watershed...", end="", flush=True)
+
+    if filename_root is None:
+        labels = _evaluate_watershed(mask, markers)
+    elif ch_id is None:
+        raise ValueError(
+            "A ch_id should be provided to identify the channel. Watershed regions were not evaluated."
+        )
+    else:
+        file = build_path(filename_root, f"-{ch_id}-watershed.npy")
+        try:
+            labels = np.load(file)
+        except (FileNotFoundError, ValueError):
+            labels = _evaluate_watershed(mask, markers)
+            try:
+                root_dir = build_path(filename_root)
+                if not osp.isdir(root_dir):
+                    os.makedirs(root_dir)
+                np.save(file, labels)
+            except:
+                print("WARNING: error saving the file.")
+
+    print("done!")
+
+    return labels
+
+
+def _get_fish_puncta(
+    fish_channel,
+    ch_id,
+    nuclei_labels,
+    nuclei_props_df,
+    spacing_ratio=(1, 1, 1),
+    thresh_min=5,
+    thresh_max=251,
+    thresh_step=5,
+):
+    print(f"Looking for FISH signatures in channel {ch_id}:")
+    fish_puncta_df = pd.DataFrame()
+    props_df = pd.DataFrame()
+    for threshold in range(thresh_min, thresh_max, thresh_step):
+        detections_at_thrs = {}
+        for idx, row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
+            lbl = row["label"]
+            print(
+                f"--- Ch: {ch_id} - Thrs: {threshold} - {idx + 1:2} / {len(nuclei_props_df):2} (lbl: {lbl:2}) ---"
+            )
+            sl = row["slice"]
+
+            # Find 647 blobs locations within the bbox, mask, and shift coordinates
+            ctrs = detect_blobs(
+                fish_channel[sl[0], sl[1], sl[2]].astype("float"),
+                min_sigma=2,
+                max_sigma=2,
+                num_sigma=1,
+                z_y_x_ratio=(1 / spacing_ratio, 1, 1),
+                threshold=threshold,
+            ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
+
+            df = pd.DataFrame(
+                ctrs, columns=["Z", "Y", "X", "sigma_Z", "sigma_Y", "sigma_X"]
+            )
+
+            if not df.empty:
+                # Drop detections that are not inside this particular nucleus
+                df.loc[:, "keep"] = False
+                for idx, row in df.iterrows():
+                    coo = row[["Z", "Y", "X"]].astype("uint16")
+                    label = nuclei_labels[coo[0], coo[1], coo[2]]
+                    if label != 0 and label == lbl:
+                        df.at[idx, "keep"] = True
+                df = df[df["keep"]].drop(columns=["keep"])
+
+                # If multiple nuclei regions with same label, concatenate detections
+                if lbl in detections_at_thrs:
+                    df = pd.concat([detections_at_thrs[lbl], df], ignore_index=True)
+
+            # If the dataframe is not empty, assign the nucleus label
+            if not df.empty:
+                df.loc[:, "nucleus"] = lbl
+                detections_at_thrs[lbl] = df
+
+            print(f"Detected {len(df)} puncta")
+        # If we had detections
+        if detections_at_thrs:
+            # Combine detections for this threshold
+            detections_at_thrs_df = pd.concat(
+                detections_at_thrs.values(), ignore_index=True
+            )
+            detections_at_thrs_df["thresholds"] = [
+                [threshold] for _ in range(len(detections_at_thrs_df))
+            ]
+            detections_at_thrs_df.loc[:, "label"] = range(1, len(detections_at_thrs_df) + 1)
+
+            # Combine in overall detection dataframe
+            if fish_puncta_df.empty:
+                fish_puncta_df = detections_at_thrs_df.copy()
+            else:
+                # Match new detection with closest from existing puncta
+                fish_tree = sci_spa.KDTree(
+                    fish_puncta_df.loc[:, ["Z", "Y", "X"]].to_numpy()
+                    * (spacing_ratio, 1, 1)
+                )
+                closest_detection = fish_tree.query(
+                    detections_at_thrs_df.loc[:, ["Z", "Y", "X"]].to_numpy()
+                    * (spacing_ratio, 1, 1)
+                )
+                detections_at_thrs_df.loc[:, "label"] = closest_detection[1] + 1
+                for _, row in detections_at_thrs_df.iterrows():
+                    fish_puncta_df.loc[
+                        fish_puncta_df["label"] == row["label"], "thresholds"
+                    ].iat[0] += [threshold]
+
+            # Create a dataframe with the detections for the current thresholds
+            # and merge with nuclei info
+            df = pd.merge(
+                detections_at_thrs_df.groupby("nucleus", as_index=False).size(),
+                detections_at_thrs_df.groupby("nucleus", as_index=False).agg(list)[
+                    ["nucleus", "label"]
+                ],
+                on="nucleus",
+            ).rename(
+                columns={
+                    "nucleus": "label",
+                    "size": ch_id + f"_cnt_{threshold:03}",
+                    "label": ch_id + f"_ids_{threshold:03}",
+                }
+            )
+            props_df = (
+                df.copy() if props_df.empty else props_df.merge(df, on="label", how="left")
+            )
+    return fish_puncta_df, props_df
+
+
+def get_fish_puncta(
+    fish_channel,
+    nuclei_labels,
+    nuclei_props_df,
+    spacing_ratio=(1, 1, 1),
+    thresh_min=5,
+    thresh_max=251,
+    thresh_step=5,
+    filename_root=None,
+    ch_id=None,
+):
+    if ch_id is None:
+        raise ValueError(
+            "A ch_id should be provided to identify the channel. FISH puncta are not detected."
+        )
+    elif filename_root is None:
+        fish_puncta_df, props_df = _get_fish_puncta(
+            fish_channel,
+            ch_id,
+            nuclei_labels,
+            nuclei_props_df,
+            spacing_ratio,
+            thresh_min,
+            thresh_max,
+            thresh_step,
+        )
+    else:
+        file_puncta = build_path(
+            filename_root,
+            f"-{ch_id}-FISH-({thresh_min}-{thresh_max}-{thresh_step})-df.json",
+        )
+        file_props = build_path(
+            filename_root,
+            f"-{ch_id}-FISH-({thresh_min}-{thresh_max}-{thresh_step})-props-df.json",
+        )
+        try:
+            fish_puncta_df = pd.read_json(file_puncta)
+            props_df = pd.read_json(file_props)
+        except FileNotFoundError:
+            fish_puncta_df, props_df = _get_fish_puncta(
+                fish_channel,
+                ch_id,
+                nuclei_labels,
+                nuclei_props_df,
+                spacing_ratio,
+                thresh_min,
+                thresh_max,
+                thresh_step,
+            )
+            try:
+                root_dir = build_path(filename_root)
+                if not osp.isdir(root_dir):
+                    os.makedirs(root_dir)
+                fish_puncta_df.to_json(file_puncta)
+                props_df.to_json(file_props)
+            except:
+                print("WARNING: error saving the file.")
+
+    return fish_puncta_df, props_df
+
+
+def analyze_image(filename=None, visualize=False, refresh=False):
     # Ask user to choose a file
     print("\n--- Starting new analysis ---")
     if filename is None:
         filename = filedialog.askopenfilename()
 
-    # Load image and extract data
-    print(f"Loading file {filename}...", end="", flush=True)
-    original = AICSImage(filename)
-    data = original.get_image_data("CZYX")
-    print("done!")
+    # Load image and extract data and metadata
+    print(f"Loading file {filename}")
+    # original = AICSImage(filename)
+    # data = original.get_image_data("CZYX")
+    image = Image(filename)
+    image.load_image()
+    data = image.get_data()
 
     # Specify channels
     # TODO: since it can change from image to image, do it through metadata
@@ -317,18 +519,21 @@ def analyze_image(filename=None, visualize=False):
     FISH_THRESHOLD_STEP = 5
 
     # Gather and report image information
-    pixel_sizes = original.physical_pixel_sizes
-    spacing = (pixel_sizes.Z, pixel_sizes.Y, pixel_sizes.X)
+    # pixel_sizes = original.physical_pixel_sizes
+    pixel_sizes = image.scaling
+    # spacing = (pixel_sizes.Z, pixel_sizes.Y, pixel_sizes.X)
+    spacing = pixel_sizes
     spacing_ratio = int(np.ceil(spacing[0] / spacing[1]))
     contrast = [[np.min(data[ch]), np.max(data[ch])] for ch in range(data.shape[0])]
-    channels = original.channel_names
+    # channels = original.channel_names
+    channels = image.channels_meta
     print("Original data info:")
     print(f"- Image shape (CH, Z, Y, X): {data.shape}")
     print(f"- Pixel sizes (Z, Y, X): {spacing}")
     print(f"  - Spacing ratio (Z / X, Y): {spacing_ratio}")
-    print(f"- Data type: {original.dtype}")
+    print(f"- Data type: {image.type_meta}")
     print(f"- Data range (per channel): {contrast}")
-    print(f"- Channels: {channels} ({[v for v in ch_dict.values()]})")
+    print(f"- Channels: {channels} => ({list(ch_dict.values())})")
 
     # --- Development only: shrink data ---
     # dds = [np.floor(d//5).astype('uint16') for d in data.shape]
@@ -336,6 +541,8 @@ def analyze_image(filename=None, visualize=False):
     # data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
     # -------------------------------------
 
+    # !Careful: contrast stretching data without signals might create a lot of
+    # !fake signals. It might be better to do it combining the different layers.
     # Contrast stretch
     for ch in range(data.shape[0]):
         print(f"Processing channel {ch_dict[ch]}:")
@@ -370,24 +577,6 @@ def analyze_image(filename=None, visualize=False):
             interpolation="nearest",
             visible=False,
         )
-
-    # # Apply a local histogram stretching to the nuclei channel
-    # print("Local histogram stretching nuclei's channel...", end="", flush=True)
-    # nuclei_hist = ski_exp.equalize_adapthist(
-    #     nuclei_defloored,
-    #     15 * np.array((1 / spacing_ratio, 1, 1))
-    # )
-    # nuclei_hist = np.round(255 * nuclei_hist).astype('uint8')
-    # viewer.add_image(
-    #     nuclei_hist,
-    #     name=ch_dict[NUCLEI_CH] + '-hist',
-    #     colormap="magenta",
-    #     blending="additive",
-    #     scale=spacing,
-    #     interpolation="nearest",
-    #     visible=False
-    # )
-    # print("done!")
 
     # Apply median filter to denoise the nuclei channel
     print("Denoising nuclei's channel:")
@@ -426,25 +615,6 @@ def analyze_image(filename=None, visualize=False):
         )
     print("done!")
 
-    # # Apply closing to nuclei's mask
-    # print("Closing nuclei's mask:")
-    # nuclei_closed = filter(
-    #     nuclei_mask,
-    #     type="closing",
-    #     footprint=ski_mor.ball(7)[3::4, ...],
-    #     filename_root=filename,
-    #     ch_id=ch_dict[NUCLEI_CH]
-    # )
-    # viewer.add_image(
-    #     nuclei_closed,
-    #     name=ch_dict[NUCLEI_CH] + '-closed',
-    #     colormap="magenta",
-    #     blending="additive",
-    #     scale=spacing,
-    #     interpolation="nearest",
-    #     visible=False
-    # )
-
     # TODO: following the threshold with the nearest neighbor creates some regions
     #       that have the same ID but are segmented. There might be multiple
     #       fractions of a nucleus that are identified while there is a single
@@ -459,6 +629,11 @@ def analyze_image(filename=None, visualize=False):
     # TODO: might be good to use a range of sigmas but it requires more memory or
     #       some cropping before analysis. Could use the bbox of the thresholded
     #       nuclei, but it might miss some low intensity ones. Might be good anyway.
+
+    # TODO: with the current threshold, a lot of centers are found. It might be
+    #       worth changing it. You should keep in mind that the thresholds are
+    #       affected by the contrast in the image. If we change how we stretch
+    #       the image, it will change the required threshold.
 
     # Detect the centers of the nuclei
     print("Detecting nuclei's centers:")
@@ -517,25 +692,12 @@ def analyze_image(filename=None, visualize=False):
         )
 
     # Use watershed to identify regions connected to the nuclei centers
-    print(
-        "Identifying regions within nuclei's mask with watershed...", end="", flush=True
+    nuclei_labels_watershed = evaluate_watershed(
+        nuclei_mask,
+        nuclei_ctrs[:, :3],
+        filename_root=filename,
+        ch_id=ch_dict[NUCLEI_CH],
     )
-
-    # Create the markers
-    nuclei_ctrs_img = np.zeros_like(data[NUCLEI_CH], dtype="uint16")
-    nuclei_ctrs_img[
-        nuclei_ctrs[:, 0].astype("uint16"),
-        nuclei_ctrs[:, 1].astype("uint16"),
-        nuclei_ctrs[:, 2].astype("uint16"),
-    ] = range(1, 1 + len(nuclei_ctrs))
-
-    # Remove markers that are not contained in the nuclei's mask
-    nuclei_ctrs_img_clean = nuclei_ctrs_img & 65535 * nuclei_mask.astype("uint16")
-
-    # Watershed nuclei's mask
-    nuclei_labels_watershed = ski_seg.watershed(
-        nuclei_mask, nuclei_ctrs_img_clean, mask=nuclei_mask, compactness=0
-    ).astype("uint16")
     if visualize:
         viewer.add_labels(
             nuclei_labels_watershed,
@@ -544,10 +706,9 @@ def analyze_image(filename=None, visualize=False):
             blending="additive",
             visible=False,
         )
-    print("done!")
 
     # Final labeled nuclei mask (no cytoplasm)
-    print("Combining vornoi and watershed nuclei's labeling...", end="", flush=True)
+    print("Combining Vornoi and watershed nuclei's labeling...", end="", flush=True)
     nuclei_labels = nuclei_labels_voronoi.copy()
     nuclei_labels[nuclei_labels_voronoi != nuclei_labels_watershed] = 0
     if visualize:
@@ -642,21 +803,22 @@ def analyze_image(filename=None, visualize=False):
             filename_root=filename,
             ch_id=ch_dict[CYTO_CH],
         )
+        if visualize:
+            viewer.add_labels(
+                cyto_inv_labels_voronoi,
+                name=ch_dict[CYTO_CH] + "-inv-vor-lbls",
+                scale=spacing,
+                blending="additive",
+                visible=False,
+            )
 
         # Use watershed to identify regions connected to the nuclei centers
-        print(
-            "Identifying regions within inverse cytoplasm's mask with watershed...",
-            end="",
-            flush=True,
+        cyto_inv_labels_watershed = evaluate_watershed(
+            cyto_mask_inv,
+            nuclei_ctrs[:, :3],
+            filename_root=filename,
+            ch_id=ch_dict[CYTO_CH],
         )
-
-        # Remove markers that are not contained in the inverse cytoplasm's mask
-        nuclei_ctrs_img_clean = nuclei_ctrs_img & 65535 * cyto_mask_inv.astype("uint16")
-
-        # Watershed nuclei's mask
-        cyto_inv_labels_watershed = ski_seg.watershed(
-            cyto_mask_inv, nuclei_ctrs_img_clean, mask=cyto_mask_inv, compactness=0
-        ).astype("uint16")
         if visualize:
             viewer.add_labels(
                 cyto_inv_labels_watershed,
@@ -665,7 +827,6 @@ def analyze_image(filename=None, visualize=False):
                 blending="additive",
                 visible=False,
             )
-        print("done!")
 
         # Final labeled nuclei mask (with cytoplasm)
         print(
@@ -694,7 +855,7 @@ def analyze_image(filename=None, visualize=False):
         # and cytoplasm masks using the masks obtained by using Voronoi on the
         # detected centroids. Should the smallest be adapted to match the largest or
         # should be a process where the threshold levels are adjusted until optimal
-        # overal is found. At each iteration we might need to Voronoi again since we
+        # overall is found. At each iteration we might need to Voronoi again since we
         # are modifying the mask.
         ############################################################################
 
@@ -748,10 +909,10 @@ def analyze_image(filename=None, visualize=False):
     # well as within the channels. Contrast stretching individual nuclei
     # area would be equivalent to use non uniform detection thresholds.
     print("Building images to analyze for FISH puncta...", end="", flush=True)
-    fish_568_to_analyze = np.zeros_like(data[FISH_568_CH])
     fish_647_to_analyze = np.zeros_like(data[FISH_647_CH])
+    fish_568_to_analyze = np.zeros_like(data[FISH_568_CH])
     min_intensity, max_intensity = np.inf, -np.inf
-    for idx, row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
+    for _, row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
         sl = row["slice"]
         slice_647 = data[FISH_647_CH, sl[0], sl[1], sl[2]]
         slice_568 = data[FISH_568_CH, sl[0], sl[1], sl[2]]
@@ -759,420 +920,198 @@ def analyze_image(filename=None, visualize=False):
         max_intensity = max(max_intensity, slice_647.max(), slice_568.max())
         fish_647_to_analyze[sl[0], sl[1], sl[2]] = slice_647
         fish_568_to_analyze[sl[0], sl[1], sl[2]] = slice_568
+    fish_647_to_analyze = ski_exp.rescale_intensity(
+        fish_647_to_analyze, in_range=(min_intensity, max_intensity)
+    )
     fish_568_to_analyze = ski_exp.rescale_intensity(
         fish_568_to_analyze, in_range=(min_intensity, max_intensity)
     )
+
+    if visualize:
+        viewer.add_image(
+            fish_647_to_analyze,
+            name=ch_dict[FISH_647_CH] + "-analyzed",
+            colormap="magenta",
+            blending="additive",
+            scale=spacing,
+            interpolation="nearest",
+            visible=False,
+        )
+        viewer.add_image(
+            fish_568_to_analyze,
+            name=ch_dict[FISH_568_CH] + "-analyzed",
+            colormap="magenta",
+            blending="additive",
+            scale=spacing,
+            interpolation="nearest",
+            visible=False,
+        )
     print("done!")
 
-    fish_647_puncta_df = pd.DataFrame()
-    fish_568_puncta_df = pd.DataFrame()
-    for threshold in range(FISH_THRESHOLD_MIN, FISH_THRESHOLD_MAX, FISH_THRESHOLD_STEP):
-        fish_647_threshold = threshold
-        fish_568_threshold = threshold
-        print(
-            f"Thresholds set at {fish_568_threshold} (568) and {fish_647_threshold} (647)"
+    # Find FISH signatures within channels
+    fish_647_puncta_df, props_647_df = get_fish_puncta(
+        fish_647_to_analyze,
+        nuclei_labels,
+        nuclei_props_df,
+        spacing_ratio,
+        ch_id=ch_dict[FISH_647_CH],
+        thresh_min=FISH_THRESHOLD_MIN,
+        thresh_max=FISH_THRESHOLD_MAX,
+        thresh_step=FISH_THRESHOLD_STEP,
+        filename_root=filename,
+    )
+    fish_568_puncta_df, props_568_df = get_fish_puncta(
+        fish_568_to_analyze,
+        nuclei_labels,
+        nuclei_props_df,
+        spacing_ratio,
+        ch_id=ch_dict[FISH_568_CH],
+        thresh_min=FISH_THRESHOLD_MIN,
+        thresh_max=FISH_THRESHOLD_MAX,
+        thresh_step=FISH_THRESHOLD_STEP,
+        filename_root=filename,
+    )
+
+    # Merge to nuclei props dataframe
+    nuclei_props_df = nuclei_props_df.merge(props_647_df, on="label", how="left")
+    nuclei_props_df = nuclei_props_df.merge(props_568_df, on="label", how="left")
+
+    # Save the nuclei properties dataframe
+    nuclei_props_df.to_json(
+        build_path(
+            filename,
+            f"-{ch_dict[NUCLEI_CH]}-FISH-({FISH_THRESHOLD_MIN}-{FISH_THRESHOLD_MAX}-{FISH_THRESHOLD_STEP})-df.json",
         )
+    )
 
-        detections_647_at_thrs = {}
-        detections_568_at_thrs = {}
-        for idx, row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
-            lbl = row["label"]
-            print(f"--- {idx + 1} / {len(nuclei_props_df)} (lbl: {lbl}) ---")
-            sl = row["slice"]
+    if visualize:
+        # Visualize puncta
+        pts_647 = viewer.add_points(
+            fish_647_puncta_df[["Z", "Y", "X"]].to_numpy(),
+            name=ch_dict[FISH_647_CH] + "-puncta",
+            size=15,
+            symbol="ring",
+            opacity=1,
+            scale=spacing,
+            edge_color="blue",
+            face_color="blue",
+            blending="additive",
+            out_of_slice_display=False,
+            visible=False,
+        )
+        pts_647.features["label"] = fish_647_puncta_df["label"]
+        pts_647.features["nucleus"] = fish_647_puncta_df["nucleus"]
+        pts_647.features["thresholds"] = fish_647_puncta_df["thresholds"]
 
-            # Find 647 blobs locations within the bbox, mask, and shift coordinates
-            print(f"{ch_dict[FISH_647_CH]} channel")
-            ctrs = detect_blobs(
-                fish_647_to_analyze[sl[0], sl[1], sl[2]].astype("float"),
-                min_sigma=2,
-                max_sigma=2,
-                num_sigma=1,
-                z_y_x_ratio=(1 / spacing_ratio, 1, 1),
-                threshold=fish_647_threshold,
-            ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
+        pts_568 = viewer.add_points(
+            fish_568_puncta_df[["Z", "Y", "X"]].to_numpy(),
+            name=ch_dict[FISH_568_CH] + "-puncta",
+            size=15,
+            symbol="ring",
+            opacity=1,
+            scale=spacing,
+            edge_color="red",
+            face_color="red",
+            blending="additive",
+            out_of_slice_display=False,
+            visible=False,
+        )
+        pts_568.features["label"] = fish_568_puncta_df["label"]
+        pts_568.features["nucleus"] = fish_568_puncta_df["nucleus"]
+        pts_568.features["thresholds"] = fish_568_puncta_df["thresholds"]
 
-            df = pd.DataFrame(
-                ctrs, columns=["Z", "Y", "X", "sigma_Z", "sigma_Y", "sigma_X"]
+        # Create a widget to control threshold for puncta visualization
+        selected_thresholds = {
+            ch_dict[FISH_647_CH] + "-puncta": FISH_THRESHOLD_MIN,
+            ch_dict[FISH_568_CH] + "-puncta": FISH_THRESHOLD_MIN,
+        }
+
+        @magicgui(
+            auto_call=True,
+            threshold={
+                "widget_type": "Slider",
+                "min": FISH_THRESHOLD_MIN,
+                "max": FISH_THRESHOLD_MAX,
+                "step": FISH_THRESHOLD_STEP,
+            },
+        )
+        def threshold_puncta(layer: napari.layers.Points, threshold: int) -> None:
+            if "thresholds" in layer.features:
+                threshold = 5 * (threshold // 5)
+                selected_thresholds[layer.name] = threshold
+                layer.shown = [threshold in f for f in layer.features["thresholds"]]
+
+        @magicgui(call_button="Display FISH")
+        def display_fish() -> None:
+            plt.close("all")
+            # Plot 647 vs 538 for each nucleus
+            top = max(
+                nuclei_props_df[
+                    ch_dict[FISH_568_CH]
+                    + f"_cnt_{selected_thresholds[ch_dict[FISH_568_CH] + '-puncta']:03}"
+                ].max(),
+                nuclei_props_df[
+                    ch_dict[FISH_647_CH]
+                    + f"_cnt_{selected_thresholds[ch_dict[FISH_647_CH] + '-puncta']:03}"
+                ].max(),
+            )
+            joint_plot = sbn.jointplot(
+                data=nuclei_props_df[nuclei_props_df["keep"]],
+                x=ch_dict[FISH_568_CH]
+                + f"_cnt_{selected_thresholds[ch_dict[FISH_568_CH] + '-puncta']:03}",
+                y=ch_dict[FISH_647_CH]
+                + f"_cnt_{selected_thresholds[ch_dict[FISH_647_CH] + '-puncta']:03}",
+                kind="hist",
+                ratio=3,
+                xlim=(0, top),
+                ylim=(0, top),
+                marginal_ticks=True,
+                cbar=True,
+                joint_kws={"binwidth": 1},
+                marginal_kws={"binwidth": 1},
             )
 
-            if not df.empty:
-                # Drop detections that are not inside this particular nucleus
-                df.loc[:, "keep"] = False
-                for idx, row in df.iterrows():
-                    coo = row[["Z", "Y", "X"]].astype("uint16")
-                    label = nuclei_labels[coo[0], coo[1], coo[2]]
-                    if label != 0 and label == lbl:
-                        df.at[idx, "keep"] = True
-                df = df[df["keep"]].drop(columns=["keep"])
-
-                # If multiple nuclei regions with same label, concatenate detections
-                if lbl in detections_647_at_thrs.keys():
-                    df = pd.concat([detections_647_at_thrs[lbl], df], ignore_index=True)
-
-                # If the dataframe is not empty, assign the nucleus label
-                if not df.empty:
-                    df.loc[:, "nucleus"] = lbl
-                    detections_647_at_thrs[lbl] = df
-
-            print(f"Detected {len(df)} puncta")
-
-            # Find 568 blobs locations within the bbox, mask, and shift coordinates
-            print(f"{ch_dict[FISH_568_CH]} channel")
-            ctrs = detect_blobs(
-                fish_568_to_analyze[sl[0], sl[1], sl[2]].astype("float"),
-                min_sigma=2,
-                max_sigma=2,
-                num_sigma=1,
-                z_y_x_ratio=(1 / spacing_ratio, 1, 1),
-                threshold=fish_568_threshold,
-            ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
-
-            df = pd.DataFrame(
-                ctrs, columns=["Z", "Y", "X", "sigma_Z", "sigma_Y", "sigma_X"]
+            # Move the colorbar to the right while keeping the plot square
+            plt.subplots_adjust(left=0.1, right=0.8, top=0.8, bottom=0.1)
+            pos_joint_ax = joint_plot.ax_joint.get_position()
+            pos_marg_x_ax = joint_plot.ax_marg_x.get_position()
+            joint_plot.ax_joint.set_position(
+                [
+                    pos_joint_ax.x0,
+                    pos_joint_ax.y0,
+                    pos_marg_x_ax.width,
+                    pos_joint_ax.height,
+                ]
             )
-
-            if not df.empty:
-                # Drop detections that are not inside this particular nucleus
-                df.loc[:, "keep"] = False
-                for idx, row in df.iterrows():
-                    coo = row[["Z", "Y", "X"]].astype("uint16")
-                    label = nuclei_labels[coo[0], coo[1], coo[2]]
-                    if label != 0 and label == lbl:
-                        df.at[idx, "keep"] = True
-                df = df[df["keep"]].drop(columns=["keep"])
-
-                # If multiple nuclei regions with same label, concatenate detections
-                if lbl in detections_568_at_thrs.keys():
-                    df = pd.concat([detections_568_at_thrs[lbl], df], ignore_index=True)
-
-                # If the dataframe is not empty, assign the nucleus label
-                if not df.empty:
-                    df.loc[:, "nucleus"] = lbl
-                    detections_568_at_thrs[lbl] = df
-
-            print(f"Detected {len(df)} puncta")
-
-        # Combine 647 detections for this threshold
-        detections_647_at_thrs_df = pd.concat(
-            detections_647_at_thrs.values(), ignore_index=True
-        )
-        detections_647_at_thrs_df["thresholds"] = [
-            [fish_647_threshold] for _ in range(len(detections_647_at_thrs_df))
-        ]
-        detections_647_at_thrs_df.loc[:, "label"] = range(
-            1, len(detections_647_at_thrs_df) + 1
-        )
-
-        # Combine in overall 647 detection dataframe
-        if fish_647_puncta_df.empty:
-            fish_647_puncta_df = detections_647_at_thrs_df.copy()
-        else:
-            # Match new detection with closest from existing puncta
-            fish_647_tree = sci_spa.KDTree(
-                fish_647_puncta_df.loc[:, ["Z", "Y", "X"]].to_numpy()
-                * (spacing_ratio, 1, 1)
+            joint_plot.fig.axes[-1].set_position(
+                [0.83, pos_joint_ax.y0, 0.07, pos_joint_ax.height]
             )
-            closest_detection = fish_647_tree.query(
-                detections_647_at_thrs_df.loc[:, ["Z", "Y", "X"]].to_numpy()
-                * (spacing_ratio, 1, 1)
+            # Enforce same limits and ticks on both axes
+            joint_plot.ax_joint.set_yticks(joint_plot.ax_joint.get_xticks())
+            joint_plot.ax_joint.set_xticks(joint_plot.ax_joint.get_yticks())
+            joint_plot.ax_joint.set_xlim(0, joint_plot.ax_joint.get_xlim()[1])
+            joint_plot.ax_joint.set_ylim(0, joint_plot.ax_joint.get_ylim()[1])
+            # Add title and axes labels
+            file = osp.split(filename)
+            plt.suptitle(file[-1])
+            plt.xlabel(
+                f"{ch_dict[FISH_568_CH]} count (thresh: {selected_thresholds[ch_dict[FISH_568_CH] + '-puncta']})"
             )
-            detections_647_at_thrs_df.loc[:, "label"] = closest_detection[1] + 1
-            for _, row in detections_647_at_thrs_df.iterrows():
-                fish_647_puncta_df.loc[
-                    fish_647_puncta_df["label"] == row["label"], "thresholds"
-                ].iat[0] += [fish_647_threshold]
-
-        # Create a dataframe with the 647 detections for the current threhsolds
-        # and merge with nuclei info
-        props_df = pd.merge(
-            detections_647_at_thrs_df.groupby("nucleus", as_index=False).size(),
-            detections_647_at_thrs_df.groupby("nucleus", as_index=False).agg(list)[
-                ["nucleus", "label"]
-            ],
-            on="nucleus",
-        ).rename(
-            columns={
-                "nucleus": "label",
-                "size": ch_dict[FISH_647_CH] + f"_cnt_{fish_647_threshold:03}",
-                "label": ch_dict[FISH_647_CH] + f"_ids_{fish_647_threshold:03}",
-            }
-        )
-        nuclei_props_df = nuclei_props_df.merge(props_df, on="label", how="left")
-
-        # Combine 568 detections for this threshold
-        detections_568_at_thrs_df = pd.concat(
-            detections_568_at_thrs.values(), ignore_index=True
-        )
-        detections_568_at_thrs_df["thresholds"] = [
-            [fish_568_threshold] for _ in range(len(detections_568_at_thrs_df))
-        ]
-        detections_568_at_thrs_df.loc[:, "label"] = range(
-            1, len(detections_568_at_thrs_df) + 1
-        )
-
-        # Combine in overall 568 detection dataframe
-        if fish_568_puncta_df.empty:
-            fish_568_puncta_df = detections_568_at_thrs_df.copy()
-        else:
-            # Match new detection with closest from existing puncta
-            fish_568_tree = sci_spa.KDTree(
-                fish_568_puncta_df.loc[:, ["Z", "Y", "X"]].to_numpy()
-                * (spacing_ratio, 1, 1)
+            plt.ylabel(
+                f"{ch_dict[FISH_647_CH]} count (thresh: {selected_thresholds[ch_dict[FISH_647_CH] + '-puncta']})"
             )
-            closest_detection = fish_568_tree.query(
-                detections_568_at_thrs_df.loc[:, ["Z", "Y", "X"]].to_numpy()
-                * (spacing_ratio, 1, 1)
-            )
-            detections_568_at_thrs_df.loc[:, "label"] = closest_detection[1] + 1
-            for _, row in detections_568_at_thrs_df.iterrows():
-                fish_568_puncta_df.loc[
-                    fish_568_puncta_df["label"] == row["label"], "thresholds"
-                ].iat[0] += [fish_568_threshold]
+            plt.show()
 
-        # Create a dataframe with the 568 detections for the current threhsolds
-        # and merge with nuclei info
-        props_df = pd.merge(
-            detections_568_at_thrs_df.groupby("nucleus", as_index=False).size(),
-            detections_568_at_thrs_df.groupby("nucleus", as_index=False).agg(list)[
-                ["nucleus", "label"]
-            ],
-            on="nucleus",
-        ).rename(
-            columns={
-                "nucleus": "label",
-                "size": ch_dict[FISH_568_CH] + f"_cnt_{fish_568_threshold:03}",
-                "label": ch_dict[FISH_568_CH] + f"_ids_{fish_568_threshold:03}",
-            }
-        )
-        nuclei_props_df = nuclei_props_df.merge(props_df, on="label", how="left")
+        @magicgui(call_button="Export FISH")
+        def export_fish() -> None:
+            print("exporting")
 
-    print("hello!")
-    input()
-    #     # Select FISH signatures within nuclei
-    #     print("Assigning FISH puncta to nuclei:...", end="", flush=True)
-    #     fish_647_puncta_df.loc[:, ["keep", "nucleus"]] = False, None
-    #     nuclei_props_df.loc[
-    #         :, ch_dict[FISH_647_CH] + f"_cnt_{fish_647_threshold:03}"
-    #     ] = 0
-    #     nuclei_props_df[ch_dict[FISH_647_CH] + f"_ids_{fish_647_threshold:03}"] = [
-    #         [] for _ in range(len(nuclei_props_df))
-    #     ]
+        # Add the widgets
+        viewer.window.add_dock_widget(threshold_puncta)
+        viewer.window.add_dock_widget(display_fish)
+        viewer.window.add_dock_widget(export_fish)
 
-    #     for _, row in fish_647_puncta_df.iterrows():
-    #         coo = row[["Z", "Y", "X"]].astype("uint16")
-    #         label = nuclei_labels[coo[0], coo[1], coo[2]]
-    #         if label != 0:
-    #             nuclei_props_df.loc[
-    #                 nuclei_props_df["label"] == label,
-    #                 ch_dict[FISH_647_CH] + f"_cnt_{fish_647_threshold:03}",
-    #             ] += 1
-    #             nuclei_props_df.loc[
-    #                 nuclei_props_df["label"] == label,
-    #                 ch_dict[FISH_647_CH] + f"_ids_{fish_647_threshold:03}",
-    #             ].values[0].append(row["label"])
-    #             fish_647_puncta_df.loc[
-    #                 fish_647_puncta_df["label"] == row["label"],
-    #                 ["keep", "nucleus"],
-    #             ] = (True, label)
-
-    #     fish_568_puncta_df.loc[:, ["keep", "nucleus"]] = False, None
-    #     nuclei_props_df.loc[
-    #         :, ch_dict[FISH_568_CH] + f"_cnt_{fish_568_threshold:03}"
-    #     ] = 0
-    #     nuclei_props_df[ch_dict[FISH_568_CH] + f"_ids_{fish_568_threshold:03}"] = [
-    #         [] for _ in range(len(nuclei_props_df))
-    #     ]
-
-    #     for _, row in fish_568_puncta_df.iterrows():
-    #         coo = row[["Z", "Y", "X"]].astype("uint16")
-    #         label = nuclei_labels[coo[0], coo[1], coo[2]]
-    #         if label != 0:
-    #             nuclei_props_df.loc[
-    #                 nuclei_props_df["label"] == label,
-    #                 ch_dict[FISH_568_CH] + f"_cnt_{fish_568_threshold:03}",
-    #             ] += 1
-    #             nuclei_props_df.loc[
-    #                 nuclei_props_df["label"] == label,
-    #                 ch_dict[FISH_568_CH] + f"_ids_{fish_568_threshold:03}",
-    #             ].values[0].append(row["label"])
-    #             fish_568_puncta_df.loc[
-    #                 fish_568_puncta_df["label"] == row["label"],
-    #                 ["keep", "nucleus"],
-    #             ] = (True, label)
-
-    #     print("done!")
-
-    #     # Some stats
-    #     print(f"{ch_dict[FISH_647_CH]} channel:")
-    #     tmp = fish_647_puncta_df.loc[fish_647_puncta_df["keep"]]
-    #     print(f"Detected {len(tmp)} puncta")
-    #     print(tmp[["sigma_Z", "sigma_Y", "sigma_X"]].describe())
-
-    #     print(f"{ch_dict[FISH_568_CH]} channel:")
-    #     tmp = fish_568_puncta_df.loc[fish_568_puncta_df["keep"]]
-    #     print(f"Detected {len(tmp)} puncta")
-    #     print(tmp[["sigma_Z", "sigma_Y", "sigma_X"]].describe())
-
-    #     # Visualize analyzed images and create point layers with FISH puncta within nuclei
-    #     # TODO: find a way to visualize puncta for all the thresholds
-    #     if visualize:
-    #         viewer.add_image(
-    #             fish_647_to_analyze,
-    #             name=ch_dict[FISH_647_CH] + "-analized",
-    #             colormap="magenta",
-    #             blending="additive",
-    #             scale=spacing,
-    #             interpolation="nearest",
-    #             visible=False,
-    #         )
-    #         viewer.add_image(
-    #             fish_568_to_analyze,
-    #             name=ch_dict[FISH_568_CH] + "-analized",
-    #             colormap="magenta",
-    #             blending="additive",
-    #             scale=spacing,
-    #             interpolation="nearest",
-    #             visible=False,
-    #         )
-
-    #         viewer.add_points(
-    #             fish_647_puncta_df.loc[
-    #                 fish_647_puncta_df["keep"], ["Z", "Y", "X"]
-    #             ].to_numpy(),
-    #             name=ch_dict[FISH_647_CH] + "-puncta",
-    #             size=15,
-    #             symbol="ring",
-    #             opacity=0.2,
-    #             scale=spacing,
-    #             edge_color="blue",
-    #             face_color="blue",
-    #             blending="additive",
-    #             out_of_slice_display=True,
-    #             visible=False,
-    #         )
-
-    #         viewer.add_points(
-    #             fish_568_puncta_df.loc[
-    #                 fish_568_puncta_df["keep"], ["Z", "Y", "X"]
-    #             ].to_numpy(),
-    #             name=ch_dict[FISH_568_CH] + "-puncta",
-    #             size=15,
-    #             symbol="ring",
-    #             opacity=0.2,
-    #             scale=spacing,
-    #             edge_color="red",
-    #             face_color="red",
-    #             blending="additive",
-    #             out_of_slice_display=True,
-    #             visible=False,
-    #         )
-
-    #     # Plot 647 vs 538 for each nucleus
-    #     top = max(
-    #         nuclei_props_df[
-    #             ch_dict[FISH_568_CH] + f"_cnt_{fish_568_threshold:03}"
-    #         ].max(),
-    #         nuclei_props_df[
-    #             ch_dict[FISH_647_CH] + f"_cnt_{fish_647_threshold:03}"
-    #         ].max(),
-    #     )
-    #     joint_plot = sbn.jointplot(
-    #         data=nuclei_props_df[nuclei_props_df["keep"]],
-    #         x=ch_dict[FISH_568_CH] + f"_cnt_{fish_568_threshold:03}",
-    #         y=ch_dict[FISH_647_CH] + f"_cnt_{fish_647_threshold:03}",
-    #         kind="hist",
-    #         ratio=3,
-    #         xlim=(0, top),
-    #         ylim=(0, top),
-    #         marginal_ticks=True,
-    #         cbar=True,
-    #         joint_kws={"binwidth": 1},
-    #         marginal_kws={"binwidth": 1},
-    #     )
-
-    #     # Move the colorbar to the right while keeping the plot square
-    #     plt.subplots_adjust(left=0.1, right=0.8, top=0.8, bottom=0.1)
-    #     pos_joint_ax = joint_plot.ax_joint.get_position()
-    #     pos_marg_x_ax = joint_plot.ax_marg_x.get_position()
-    #     joint_plot.ax_joint.set_position(
-    #         [pos_joint_ax.x0, pos_joint_ax.y0, pos_marg_x_ax.width, pos_joint_ax.height]
-    #     )
-    #     joint_plot.fig.axes[-1].set_position(
-    #         [0.83, pos_joint_ax.y0, 0.07, pos_joint_ax.height]
-    #     )
-    #     # Enforce same limits and ticks on both axes
-    #     joint_plot.ax_joint.set_yticks(joint_plot.ax_joint.get_xticks())
-    #     joint_plot.ax_joint.set_xticks(joint_plot.ax_joint.get_yticks())
-    #     joint_plot.ax_joint.set_xlim(0, joint_plot.ax_joint.get_xlim()[1])
-    #     joint_plot.ax_joint.set_ylim(0, joint_plot.ax_joint.get_ylim()[1])
-    #     # Add title and axes labels
-    #     file = osp.split(filename)
-    #     plt.suptitle(file[-1])
-    #     plt.xlabel(f"{ch_dict[FISH_568_CH]} count (thresh: {fish_568_threshold})")
-    #     plt.ylabel(f"{ch_dict[FISH_647_CH]} count (thresh: {fish_647_threshold})")
-
-    #     # Evaluate which nuclei have a particular FISH count
-    #     nuclei_count_df = (
-    #         nuclei_props_df.groupby(
-    #             [
-    #                 ch_dict[FISH_568_CH] + f"_cnt_{fish_568_threshold:03}",
-    #                 ch_dict[FISH_647_CH] + f"_cnt_{fish_647_threshold:03}",
-    #             ]
-    #         )
-    #         .agg(list)[["label"]]
-    #         .reset_index()
-    #     )
-    #     print(f"Nuclei with given FISH counts:\n{nuclei_count_df}")
-
-    #     # Save figure
-    #     root_dir = build_path(filename)
-    #     if not osp.isdir(root_dir):
-    #         os.makedirs(root_dir)
-    #     plt.savefig(
-    #         build_path(
-    #             filename,
-    #             f"-{ch_dict[NUCLEI_CH]}-FISH-({fish_568_threshold:03}, {fish_647_threshold:03})-plot.pdf",
-    #         ),
-    #         bbox_inches="tight",
-    #     )
-
-    #     # Save the dataframes
-    #     fish_647_puncta_df.to_json(
-    #         build_path(
-    #             filename,
-    #             f"-{ch_dict[FISH_647_CH]}-FISH-({fish_647_threshold:03})-df.json",
-    #         )
-    #     )
-    #     fish_568_puncta_df.to_json(
-    #         build_path(
-    #             filename,
-    #             f"-{ch_dict[FISH_568_CH]}-FISH-({fish_568_threshold:03})-df.json",
-    #         )
-    #     )
-    #     nuclei_count_df.to_json(
-    #         build_path(
-    #             filename,
-    #             f"-FISH_count_per_nuclei-({fish_568_threshold:03}, {fish_647_threshold:03})-df.json",
-    #         )
-    #     )
-    #     print("done!")
-
-    #     if visualize:
-    #         plt.show(block=False)
-    #         napari.run()
-
-    # # Save nuclei dataframe
-    # print(
-    #     "Saving the nuclei's and puncta's property dataframes...",
-    #     end="",
-    #     flush=True,
-    # )
-    # nuclei_props_df.to_json(
-    #     build_path(
-    #         filename,
-    #         f"-{ch_dict[NUCLEI_CH]}-FISH-({FISH_THRESHOLD_MIN}-{FISH_THRESHOLD_MAX}-{FISH_THRESHOLD_STEP})-df.json",
-    #     )
-    # )
+        napari.run()
 
 
 ##############################################################################################
@@ -1192,10 +1131,10 @@ def analyze_image(filename=None, visualize=False):
 # print("done!")
 
 # # TODO: ideas to try to detect center of nuclei:
-# #       - Blurr segmented, find max, watershed with Vornoi boundaries:
+# #       - Blur segmented, find max, watershed with Vornoi boundaries:
 # #         https://github.com/clEsperanto/pyclesperanto_prototype/blob/master/demo/segmentation/Segmentation_3D.ipynb
 # #         https://github.com/clEsperanto/pyclesperanto_prototype/blob/master/demo/segmentation/voronoi_otsu_labeling.ipynb)
-# #       - Gaussian blurr, then 3D Frangi to detect blobness then max of Frangi to detect nuclei
+# #       - Gaussian blur, then 3D Frangi to detect blobness then max of Frangi to detect nuclei
 # #         centers and then use those for watershed.
 # #       - Autocorrelation: cells are about the same size and autocorrelation should peak when
 # #         they overlap. Or use one cell as template and template matching. If we can find the
@@ -1333,26 +1272,62 @@ def analyze_image(filename=None, visualize=False):
 # #        - CellProfiler (https://cellprofiler.org/)
 # #        - CellSegm (https://scfbm.biomedcentral.com/articles/10.1186/1751-0473-8-16)
 # #        - SMMF algorithm (https://ieeexplore.ieee.org/document/4671118)
+# #        - Ilastik (https://www.ilastik.org/) for cell segmentation
 # #        - Imaris methods
 # #        - 3D UNET, nnUNET
 # #        - pyradiomics (https://pyradiomics.readthedocs.io/en/latest/index.html) for feature extraction
+# #        - AroSpotFindingSuite (https://gitlab.com/evodevosys/AroSpotFindingSuite) for FISH
+# #        - BlobFinder (software no longer availale but paper is: doi:10.1016/j.cmpb.2008.08.006)
+# #        - FISH-quant (https://code.google.com/archive/p/fish-quant/)
+# #        - ImageM (from https://www.nature.com/articles/nprot.2013.109).
+# #          ImageM and other MATLAB codes developed in our lab are available
+# #          upon request (requests can be addressed to
+# #          S.I. (shalev.itzkovitz@weizmann.ac.il),
+# #          J.P.J. (j.junker@hubrecht.eu) and
+# #          A.v.O. (a.oudenaarden@hubrecht.eu))
 
 
 from glob import glob
 
 if __name__ == "__main__":
-    analyze_image(visualize=False)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--file",
+        help="CZI file to analyze. If not specified, the user will be asked to select a file.",
+        default=None,
+    )
+    parser.add_argument(
+        "--visualize",
+        help="display analysis results using napari",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--refresh",
+        help="Don't use and refresh existing stored analysis",
+        default=False,
+        action="store_true",
+    )
+    args = parser.parse_args()
+
+    if args.visualize:
+        plt.ion()
+
+    analyze_image(args.file, visualize=args.visualize, refresh=args.refresh)
 
     # files = [
     #     g
     #     for p in [
-    #         "/Volumes/GoogleDrive/Shared drives/MarkD/FISH analysis/FISH Nov 2022/20221101_cad87A-568_dpr17-647_2(DAPI-405).czi",
+    #         "/Users/avaccari/Library/CloudStorage/GoogleDrive-avaccari@middlebury.edu/Shared drives/MarkD/FISH analysis/2023-01 LPLC2 FISH calibration/*.czi"
     #     ]
     #     for g in glob(p)
     # ]
     # files.sort()
     # for f in files:
-    #     analyze_image(
-    #         f,
-    #         visualize=False,
-    #     )
+    #     try:
+    #         analyze_image(
+    #             f,
+    #             visualize=False,
+    #         )
+    #     except:
+    #         pass
