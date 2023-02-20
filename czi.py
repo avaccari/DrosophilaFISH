@@ -38,31 +38,32 @@ class Czi:
 
     def get_metadata(self):
         self._logger.debug("Reading metadata")
-        meta = {}
         czi_meta = xmltodict.parse(self.czi.metadata())
-
         scaling = czi_meta["ImageDocument"]["Metadata"]["Scaling"]["Items"]["Distance"]
         d = {d["@Id"]: float(d["Value"]) for d in scaling}
-        meta["scaling_z_y_x"] = (d["Z"], d["Y"], d["X"])
-
-        meta["image_type"] = {
-            "bit_depth" : czi_meta["ImageDocument"]["Metadata"]["Information"]["Image"]["ComponentBitCount"],
-            "type": czi_meta["ImageDocument"]["Metadata"]["Information"]["Image"]["PixelType"]
-        }
-
         channels = czi_meta["ImageDocument"]["Metadata"]["Information"]["Image"][
             "Dimensions"
         ]["Channels"]["Channel"]
-        ch = {}
-        for c in range(len(channels)):
-            ch[c] = {
+        ch = {
+            c: {
                 "Id": channels[c]["@Id"],
                 "Name": channels[c]["@Name"],
                 "Wavelength": channels[c]["EmissionWavelength"],
             }
-        meta["channels"] = ch
-
-        return meta
+            for c in range(len(channels))
+        }
+        return {
+            "scaling_z_y_x": (d["Z"], d["Y"], d["X"]),
+            "image_type": {
+                "bit_depth": czi_meta["ImageDocument"]["Metadata"]["Information"][
+                    "Image"
+                ]["ComponentBitCount"],
+                "type": czi_meta["ImageDocument"]["Metadata"]["Information"]["Image"][
+                    "PixelType"
+                ],
+            },
+            "channels": ch,
+        }
 
     def get_data(self):
         self._logger.debug("Reading data")
