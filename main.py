@@ -20,8 +20,9 @@ import skimage.morphology as ski_mor
 import skimage.segmentation as ski_seg
 from magicgui import magicgui
 
+import os_utils
 from image import Image
-from os_utils import build_path
+
 
 #! IMPORTANT FOR CONSISTENCY: add a flag so that if there is an exception with a
 #! file, all the following steps are re-evaluated instead of using stored values
@@ -83,24 +84,26 @@ def filter(
         )
     else:
         if type == "closing":
-            file = build_path(
+            file = os_utils.build_path(
                 filename_root,
                 f"-{ch_id}-clos-{footprint_dim}.npy",
             )
         elif type == "gaussian":
-            file = build_path(
+            file = os_utils.build_path(
                 filename_root,
                 f"-{ch_id}-den-gaus-{tuple(np.round(sigma, decimals=2))}.npy",
             )
         elif type == "maximum":
-            file = build_path(
+            file = os_utils.build_path(
                 filename_root,
                 f"-{ch_id}-max-{footprint_dim}.npy",
             )
         elif type == "median":
-            file = build_path(filename_root, f"-{ch_id}-den-med-{footprint_dim}.npy")
+            file = os_utils.build_path(
+                filename_root, f"-{ch_id}-den-med-{footprint_dim}.npy"
+            )
         try:
-            filtered = np.load(file)
+            filtered = os_utils.load(file)
         except (FileNotFoundError, ValueError):
             if type == "closing":
                 filtered = ski_mor.closing(data, footprint=footprint)
@@ -115,10 +118,10 @@ def filter(
                     data, mode=mode, cval=cval, footprint=footprint
                 )
             try:
-                root_dir = build_path(filename_root)
+                root_dir = os_utils.build_path(filename_root)
                 if not osp.isdir(root_dir):
                     os.makedirs(root_dir)
-                np.save(file, filtered)
+                os_utils.save(file, filtered)
             except:
                 print("WARNING: error saving the file.")
     print("done!")
@@ -165,9 +168,9 @@ def detect_blobs(
             "WARNING: a ch_id should be provided to identify the channel. Blobs were not detected."
         )
     else:
-        file = build_path(filename_root, f"-{ch_id}-blb.npy")
+        file = os_utils.build_path(filename_root, f"-{ch_id}-blb.npy")
         try:
-            blobs_ctrs = np.load(file)
+            blobs_ctrs = os_utils.load(file)
         except FileNotFoundError:
             blobs_ctrs = ski_fea.blob_log(
                 data,
@@ -178,10 +181,10 @@ def detect_blobs(
                 exclude_border=True,
             )
             try:
-                root_dir = build_path(filename_root)
+                root_dir = os_utils.build_path(filename_root)
                 if not osp.isdir(root_dir):
                     os.makedirs(root_dir)
-                np.save(file, blobs_ctrs)
+                os_utils.save(file, blobs_ctrs)
             except:
                 print("WARNING: error saving the file.")
     print("done!")
@@ -213,16 +216,16 @@ def evaluate_voronoi(mask, markers, spacing=(1, 1, 1), filename_root=None, ch_id
             "A ch_id should be provided to identify the channel. Vornoi regions were not evaluated."
         )
     else:
-        file = build_path(filename_root, f"-{ch_id}-voronoi.npy")
+        file = os_utils.build_path(filename_root, f"-{ch_id}-voronoi.npy")
         try:
-            labels = np.load(file)
+            labels = os_utils.load(file)
         except (FileNotFoundError, ValueError):
             labels = _evaluate_voronoi(mask, markers, spacing)
             try:
-                root_dir = build_path(filename_root)
+                root_dir = os_utils.build_path(filename_root)
                 if not osp.isdir(root_dir):
                     os.makedirs(root_dir)
-                np.save(file, labels)
+                os_utils.save(file, labels)
             except:
                 print("WARNING: error saving the file.")
 
@@ -259,16 +262,16 @@ def evaluate_watershed(mask, markers, filename_root=None, ch_id=None):
             "A ch_id should be provided to identify the channel. Watershed regions were not evaluated."
         )
     else:
-        file = build_path(filename_root, f"-{ch_id}-watershed.npy")
+        file = os_utils.build_path(filename_root, f"-{ch_id}-watershed.npy")
         try:
-            labels = np.load(file)
+            labels = os_utils.load(file)
         except (FileNotFoundError, ValueError):
             labels = _evaluate_watershed(mask, markers)
             try:
-                root_dir = build_path(filename_root)
+                root_dir = os_utils.build_path(filename_root)
                 if not osp.isdir(root_dir):
                     os.makedirs(root_dir)
-                np.save(file, labels)
+                os_utils.save(file, labels)
             except:
                 print("WARNING: error saving the file.")
 
@@ -423,11 +426,11 @@ def get_fish_puncta(
             thresh_step,
         )
     else:
-        file_puncta = build_path(
+        file_puncta = os_utils.build_path(
             filename_root,
             f"-{ch_id}-FISH-({thresh_min}-{thresh_max}-{thresh_step})-df",
         )
-        file_props = build_path(
+        file_props = os_utils.build_path(
             filename_root,
             f"-{ch_id}-FISH-({thresh_min}-{thresh_max}-{thresh_step})-props-df",
         )
@@ -447,7 +450,7 @@ def get_fish_puncta(
                 thresh_step,
             )
             try:
-                root_dir = build_path(filename_root)
+                root_dir = os_utils.build_path(filename_root)
                 if not osp.isdir(root_dir):
                     os.makedirs(root_dir)
                 fish_puncta_df.to_json(file_puncta + ".json")
@@ -944,8 +947,8 @@ def analyze_image(
     nuclei_labels = filter(
         nuclei_labels,
         type="maximum",
-        footprint=ski_mor.ball(5)[2::3],
-        # footprint=ski_mor.ball(7)[3::4],
+        # footprint=ski_mor.ball(5)[2::3],
+        footprint=ski_mor.ball(7)[3::4],
         # footprint=ski_mor.ball(9)[1::4],
         filename_root=filename,
         ch_id=ch_dict[NUCLEI_CH],
@@ -1086,7 +1089,7 @@ def analyze_image(
     )
 
     # Save the nuclei properties dataframe
-    path = build_path(
+    path = os_utils.build_path(
         filename,
         f"-{ch_dict[NUCLEI_CH]}-FISH-({FISH_THRESHOLD_MIN}-{FISH_THRESHOLD_MAX}-{FISH_THRESHOLD_STEP})-df",
     )
