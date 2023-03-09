@@ -1,5 +1,5 @@
 import argparse
-import json
+
 import os
 import os.path as osp
 from tkinter import filedialog
@@ -15,81 +15,35 @@ import skimage.exposure as ski_exp
 import skimage.feature as ski_fea
 import skimage.filters as ski_fil
 import skimage.filters.rank as ski_fil_ran
-import skimage.io as ski_io
 import skimage.measure as ski_mea
 import skimage.morphology as ski_mor
 import skimage.segmentation as ski_seg
 from magicgui import magicgui
 
 from image import Image
+from os_utils import build_path
 
 #! IMPORTANT FOR CONSISTENCY: add a flag so that if there is an exception with a
-#! file, all the following one are re-evaluated.
+#! file, all the following steps are re-evaluated instead of using stored values
 #! Check the "refresh" argument of the analyze_image() function.
 
 
 def contrast_stretch(data, in_range="image"):
     print("Contrast stretching...", end="", flush=True)
-    min_b = data.min()
-    max_b = data.max()
+    input_min = data.min()
+    input_max = data.max()
+    input_median = np.median(data)
     data = ski_exp.rescale_intensity(data, in_range)
-    min_a = data.min()
-    max_a = data.max()
+    scaled_min = data.min()
+    scaled_max = data.max()
+    scaled_median = np.median(data)
     print(
-        f" [{min_b}, {max_b}] => {in_range} => [{min_a}, {max_a}]... ",
+        f" [{input_min}, {input_max}] => {in_range} => [{scaled_min}, {scaled_max}]... median: {input_median} => {scaled_median}... ",
         end="",
         flush=True,
     )
     print("done!")
     return data
-
-
-def uint16_to_uint8(data):
-    print("Converting from uint16 to uint8...", end="", flush=True)
-    converted = data // 256
-    converted = converted.astype(np.uint8)
-    print("done!")
-    return converted
-
-
-def build_path(filename_root, suffix=None):
-    dir, file = osp.split(filename_root)
-    file_name, _ = osp.splitext(file)
-    root_dir = osp.join(dir, file_name)
-    return root_dir if suffix is None else osp.join(root_dir, file_name + suffix)
-
-
-def load_metadata(filename_root, sec_data=None):
-    file = build_path(filename_root, "-meta.json")
-    try:
-        with open(file) as meta_file:
-            meta_data = json.load(meta_file)
-            return meta_data if sec_data is None else meta_data[sec_data]
-    except FileNotFoundError:
-        print("WARNING: Metadata file not found!")
-        return None
-    except json.decoder.JSONDecodeError:
-        print("WARNING: Metadata file is not in the correct format!")
-        return None
-    except KeyError:
-        print(f"WARNING: Section {sec_data} not found in metadata file!")
-        return {}
-
-
-def save_metadata(filename_root, sec_name=None, sec_data=None):
-    file = build_path(filename_root, "-meta.json")
-    try:
-        root_dir = build_path(filename_root)
-        if not osp.isdir(root_dir):
-            os.makedirs(root_dir)
-        with open(file, "w") as meta_file:
-            if meta_data is None:
-                meta_data = {sec_name: sec_data}
-            else:
-                meta_data[sec_name] = sec_data
-            json.dump(meta_data, meta_file)
-    except OSError:
-        print("WARNING: Issues opening the metadata file!")
 
 
 def filter(
@@ -345,6 +299,7 @@ def _get_fish_puncta(
             sl = row["slice"]
 
             # Find 647 blobs locations within the bbox, mask, and shift coordinates
+            # TODO: consider using a range of sigmas and then Frangi to preserve the most blobby
             ctrs = detect_blobs(
                 fish_channel[sl[0], sl[1], sl[2]].astype("float"),
                 min_sigma=2,
@@ -378,58 +333,65 @@ def _get_fish_puncta(
                 detections_at_thrs[lbl] = df
 
             print(f"Detected {len(df)} puncta")
-        # If we had detections
-        if detections_at_thrs:
-            # Combine detections for this threshold
-            detections_at_thrs_df = pd.concat(
-                detections_at_thrs.values(), ignore_index=True
-            )
-            detections_at_thrs_df["thresholds"] = [
-                [threshold] for _ in range(len(detections_at_thrs_df))
-            ]
-            detections_at_thrs_df.loc[:, "label"] = range(
-                1, len(detections_at_thrs_df) + 1
-            )
 
-            # Combine in overall detection dataframe
-            if fish_puncta_df.empty:
-                fish_puncta_df = detections_at_thrs_df.copy()
-            else:
-                # Match new detection with closest from existing puncta
-                fish_tree = sci_spa.KDTree(
-                    fish_puncta_df.loc[:, ["Z", "Y", "X"]].to_numpy()
-                    * (spacing_ratio, 1, 1)
-                )
-                closest_detection = fish_tree.query(
-                    detections_at_thrs_df.loc[:, ["Z", "Y", "X"]].to_numpy()
-                    * (spacing_ratio, 1, 1)
-                )
-                detections_at_thrs_df.loc[:, "label"] = closest_detection[1] + 1
-                for _, row in detections_at_thrs_df.iterrows():
-                    fish_puncta_df.loc[
-                        fish_puncta_df["label"] == row["label"], "thresholds"
-                    ].iat[0] += [threshold]
+        # Assumption: if there are no detections at a given threshold, there
+        # will be none at higher thresholds.
+        # TODO: Modify to fill the remaining thresholds with 0 cnt and [] ids
+        if not detections_at_thrs:
+            break
 
-            # Create a dataframe with the detections for the current thresholds
-            # and merge with nuclei info
-            df = pd.merge(
-                detections_at_thrs_df.groupby("nucleus", as_index=False).size(),
-                detections_at_thrs_df.groupby("nucleus", as_index=False).agg(list)[
-                    ["nucleus", "label"]
-                ],
-                on="nucleus",
-            ).rename(
-                columns={
-                    "nucleus": "label",
-                    "size": ch_id + f"_cnt_{threshold:03}",
-                    "label": ch_id + f"_ids_{threshold:03}",
-                }
+        # Combine detections for this threshold
+        detections_at_thrs_df = pd.concat(
+            detections_at_thrs.values(), ignore_index=True
+        )
+        detections_at_thrs_df["thresholds"] = [
+            [threshold] for _ in range(len(detections_at_thrs_df))
+        ]
+        detections_at_thrs_df.loc[:, "label"] = range(1, len(detections_at_thrs_df) + 1)
+
+        # Combine in overall detection dataframe
+        if fish_puncta_df.empty:
+            fish_puncta_df = detections_at_thrs_df.copy()
+        else:
+            # Match new detection with closest from existing puncta
+            fish_tree = sci_spa.KDTree(
+                fish_puncta_df.loc[:, ["Z", "Y", "X"]].to_numpy()
+                * (spacing_ratio, 1, 1)
             )
-            props_df = (
-                df.copy()
-                if props_df.empty
-                else props_df.merge(df, on="label", how="left")
+            closest_detection = fish_tree.query(
+                detections_at_thrs_df.loc[:, ["Z", "Y", "X"]].to_numpy()
+                * (spacing_ratio, 1, 1)
             )
+            detections_at_thrs_df.loc[:, "label"] = closest_detection[1] + 1
+            for _, row in detections_at_thrs_df.iterrows():
+                fish_puncta_df.loc[
+                    fish_puncta_df["label"] == row["label"], "thresholds"
+                ].iat[0] += [threshold]
+
+        # Create a dataframe with the detections for the current thresholds
+        # and merge with nuclei info
+        df = pd.merge(
+            detections_at_thrs_df.groupby("nucleus", as_index=False).size(),
+            detections_at_thrs_df.groupby("nucleus", as_index=False).agg(list)[
+                ["nucleus", "label"]
+            ],
+            on="nucleus",
+        ).rename(
+            columns={
+                "nucleus": "label",
+                "size": ch_id + f"_cnt_{threshold:03}",
+                "label": ch_id + f"_ids_{threshold:03}",
+            }
+        )
+        props_df = (
+            df.copy() if props_df.empty else props_df.merge(df, on="label", how="left")
+        )
+    # Fill missing counts with zeros and missing ids with empty lists
+    filt = props_df.filter(regex="cnt")
+    props_df[filt.columns] = filt.fillna(0)
+    filt = props_df.filter(regex="ids")
+    props_df[filt.columns] = filt.fillna(props_df.notna().applymap(lambda x: x or []))
+
     return fish_puncta_df, props_df
 
 
@@ -510,12 +472,20 @@ def analyze_image(
     print("\n--- Starting new analysis ---")
     if filename is None:
         filename = filedialog.askopenfilename()
+        if filename == "":
+            raise ValueError("A .czi file should be provided for analysis.")
 
     # Load image and extract data and metadata
     print(f"Loading file {filename}")
     image = Image(filename)
     image.load_image()
     data = image.get_data()
+
+    # --- Development only: shrink data ---
+    # dds = [np.floor(d//4).astype('uint16') for d in data.shape]
+    # dde = [np.ceil(d - d//4).astype('uint16') for d in data.shape]
+    # data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
+    # -------------------------------------
 
     # Specify channels
     #! This is a hack to make it work with the calibration data
@@ -565,12 +535,6 @@ def analyze_image(
     if only_metadata:
         return
 
-    # --- Development only: shrink data ---
-    # dds = [np.floor(d//5).astype('uint16') for d in data.shape]
-    # dde = [np.ceil(d - d//5).astype('uint16') for d in data.shape]
-    # data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
-    # -------------------------------------
-
     # Contrast stretch nuclei and cyto
     for ch in (NUCLEI_CH, CYTO_CH):
         print(f"Processing channel {ch_dict[ch]}:")
@@ -595,7 +559,7 @@ def analyze_image(
         max_intensity = max(
             max_intensity, data[FISH_568_CH].max(), data[FISH_647_CH].max()
         )
-        for ch in (FISH_568_CH, FISH_647_CH):
+        for ch in (FISH_647_CH, FISH_568_CH):
             print(f"Processing channel {ch_dict[ch]}:")
             if fish_range is None:
                 data[ch] = contrast_stretch(
@@ -609,7 +573,40 @@ def analyze_image(
 
     # If needed, convert to uint8
     if data.dtype != "uint8":
-        data = uint16_to_uint8(data)
+        for ch in range(data.shape[0]):
+            print(
+                f"Converting {ch_dict[ch]} from uint16 to uint8...", end="", flush=True
+            )
+            input_min = data[ch].min()
+            input_max = data[ch].max()
+            input_median = np.median(data[ch])
+            data[ch] = data[ch] // 256
+            converted_min = data[ch].min()
+            converted_max = data[ch].max()
+            converted_median = np.median(data[ch])
+            print(
+                f" [{input_min}, {input_max}] => [{converted_min}, {converted_max}]... median: {input_median} => {converted_median}... ",
+                end="",
+                flush=True,
+            )
+            print("done!")
+        data = data.astype("uint8")
+
+    # Show original data
+    if visualize:
+        # Show pre-processed data
+        viewer = napari.Viewer(title=osp.split(filename)[1], ndisplay=3)
+        viewer.add_image(
+            data,
+            channel_axis=0,
+            name=[ch + "-orig" for ch in ch_dict.values()],
+            colormap="green",
+            blending="additive",
+            scale=spacing,
+            depiction="volume",
+            interpolation="nearest",
+            visible=False,
+        )
 
     # Remove floor from each channel
     for ch in range(data.shape[0]):
@@ -640,18 +637,17 @@ def analyze_image(
         max_intensity = max(
             max_intensity, data[FISH_568_CH].max(), data[FISH_647_CH].max()
         )
-        for ch in (FISH_568_CH, FISH_647_CH):
+        for ch in (FISH_647_CH, FISH_568_CH):
             print(f"Processing channel {ch_dict[ch]}:")
             data[ch] = contrast_stretch(
                 data[ch], in_range=(min_intensity, max_intensity)
             )
     if visualize:
-        # Show original data
-        viewer = napari.Viewer(title=osp.split(filename)[1], ndisplay=3)
+        # Show pre-processed data
         viewer.add_image(
             data,
             channel_axis=0,
-            name=ch_dict.values(),
+            name=[ch + "-pre" for ch in ch_dict.values()],
             colormap="green",
             blending="additive",
             scale=spacing,
@@ -666,7 +662,7 @@ def analyze_image(
         data[NUCLEI_CH],
         footprint=ski_mor.ball(7)[3::4],
         filename_root=filename,
-        ch_id=ch_dict[NUCLEI_CH],  # ! We removed the stretch
+        ch_id=ch_dict[NUCLEI_CH],
     )
     if visualize:
         viewer.add_image(
@@ -948,8 +944,8 @@ def analyze_image(
     nuclei_labels = filter(
         nuclei_labels,
         type="maximum",
-        # footprint=ski_mor.ball(5)[2::3],
-        footprint=ski_mor.ball(7)[3::4],
+        footprint=ski_mor.ball(5)[2::3],
+        # footprint=ski_mor.ball(7)[3::4],
         # footprint=ski_mor.ball(9)[1::4],
         filename_root=filename,
         ch_id=ch_dict[NUCLEI_CH],
@@ -993,7 +989,7 @@ def analyze_image(
     # globally. This should normalize the puncta intensity among channels as
     # well as within the channels. Contrast stretching individual nuclei
     # area would be equivalent to use non uniform detection thresholds.
-    print("Building images to analyze for FISH puncta...", end="", flush=True)
+    print("Building images to analyze for FISH puncta:")
     #! Hack to work with calibration data
     if channels == 4:
         fish_647_to_analyze = np.zeros_like(data[FISH_647_CH])
@@ -1018,10 +1014,12 @@ def analyze_image(
         fish_568_to_analyze[sl[0], sl[1], sl[2]] = slice_568
     #! Hack to work with calibration data
     if channels == 4:
-        fish_647_to_analyze = ski_exp.rescale_intensity(
+        print(f"Processing channel {ch_dict[FISH_647_CH]}:")
+        fish_647_to_analyze = contrast_stretch(
             fish_647_to_analyze, in_range=(min_intensity, max_intensity)
         )
-    fish_568_to_analyze = ski_exp.rescale_intensity(
+    print(f"Processing channel {ch_dict[FISH_568_CH]}:")
+    fish_568_to_analyze = contrast_stretch(
         fish_568_to_analyze, in_range=(min_intensity, max_intensity)
     )
 
@@ -1046,7 +1044,6 @@ def analyze_image(
             interpolation="nearest",
             visible=False,
         )
-    print("done!")
 
     # Find FISH signatures within channels
     #! Hack to work with calibration data
@@ -1079,6 +1076,14 @@ def analyze_image(
     if channels == 4:
         nuclei_props_df = nuclei_props_df.merge(props_647_df, on="label", how="left")
     nuclei_props_df = nuclei_props_df.merge(props_568_df, on="label", how="left")
+
+    # Fill missing counts with zeros and missing ids with empty lists
+    filt = nuclei_props_df.filter(regex="cnt")
+    nuclei_props_df[filt.columns] = filt.fillna(0)
+    filt = nuclei_props_df.filter(regex="ids")
+    nuclei_props_df[filt.columns] = filt.fillna(
+        nuclei_props_df.notna().applymap(lambda x: x or [])
+    )
 
     # Save the nuclei properties dataframe
     path = build_path(
@@ -1438,12 +1443,13 @@ if __name__ == "__main__":
         default=False,
         action="store_true",
     )
-    args = parser.parse_args()
     parser.add_argument(
         "--fish_range",
         help="Range (min, max) to use for the initial FISH contrast stretching. If not specified, the values will be extracted from each channel.",
         default=None,
     )
+
+    args = parser.parse_args()
 
     if args.visualize:
         plt.ion()
