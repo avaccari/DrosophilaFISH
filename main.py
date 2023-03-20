@@ -4,7 +4,7 @@ import os.path as osp
 from tkinter import filedialog
 
 import colorama
-from colorama import Back, Fore, Style
+from colorama import Fore, Style
 import matplotlib.pyplot as plt
 import napari
 import numpy as np
@@ -550,7 +550,7 @@ def analyze_image(
         raise ValueError("Number of channels not allowed.")
 
     # Specify thresholds for FISH detection
-    FISH_THRESHOLD_MIN = 10
+    FISH_THRESHOLD_MIN = 5
     FISH_THRESHOLD_MAX = 251
     FISH_THRESHOLD_STEP = 5
 
@@ -1122,51 +1122,51 @@ def analyze_image(
             visible=False,
         )
 
-    # Apply median filter to denoise the FISH channels
-    #! Hack to work with calibration data
-    if channels == 4:
-        fish_647_to_analyze = filter(
-            fish_647_to_analyze,
-            # footprint=ski_mor.ball(1),
-            # footprint=ski_mor.ball(2)[1:4],
-            # footprint=ski_mor.ball(3)[1::2],
-            # footprint=ski_mor.ball(5)[2::3],
-            footprint=ski_mor.ball(7)[3::4],
-            filename_root=filename,
-            ch_id=ch_dict[FISH_647_CH],
-        )
-    fish_568_to_analyze = filter(
-        fish_568_to_analyze,
-        # footprint=ski_mor.ball(1),
-        # footprint=ski_mor.ball(2)[1:4],
-        # footprint=ski_mor.ball(3)[1::2],
-        # footprint=ski_mor.ball(5)[2::3],
-        footprint=ski_mor.ball(7)[3::4],
-        filename_root=filename,
-        ch_id=ch_dict[FISH_568_CH],
-    )
+    # # Apply median filter to denoise the FISH channels
+    # #! Hack to work with calibration data
+    # if channels == 4:
+    #     fish_647_to_analyze = filter(
+    #         fish_647_to_analyze,
+    #         # footprint=ski_mor.ball(1),
+    #         # footprint=ski_mor.ball(2)[1:4],
+    #         # footprint=ski_mor.ball(3)[1::2],
+    #         # footprint=ski_mor.ball(5)[2::3],
+    #         footprint=ski_mor.ball(7)[3::4],
+    #         filename_root=filename,
+    #         ch_id=ch_dict[FISH_647_CH],
+    #     )
+    # fish_568_to_analyze = filter(
+    #     fish_568_to_analyze,
+    #     # footprint=ski_mor.ball(1),
+    #     # footprint=ski_mor.ball(2)[1:4],
+    #     # footprint=ski_mor.ball(3)[1::2],
+    #     # footprint=ski_mor.ball(5)[2::3],
+    #     footprint=ski_mor.ball(7)[3::4],
+    #     filename_root=filename,
+    #     ch_id=ch_dict[FISH_568_CH],
+    # )
 
-    if visualize:
-        #! Hack to work with calibration data
-        if channels == 4:
-            viewer.add_image(
-                fish_647_to_analyze,
-                name=ch_dict[FISH_647_CH] + "-analyzed-stretched-defloored-median",
-                colormap="magenta",
-                blending="additive",
-                scale=spacing,
-                interpolation="nearest",
-                visible=False,
-            )
-        viewer.add_image(
-            fish_568_to_analyze,
-            name=ch_dict[FISH_568_CH] + "-analyzed-stretched-defloored-median",
-            colormap="magenta",
-            blending="additive",
-            scale=spacing,
-            interpolation="nearest",
-            visible=False,
-        )
+    # if visualize:
+    #     #! Hack to work with calibration data
+    #     if channels == 4:
+    #         viewer.add_image(
+    #             fish_647_to_analyze,
+    #             name=ch_dict[FISH_647_CH] + "-analyzed-stretched-defloored-median",
+    #             colormap="magenta",
+    #             blending="additive",
+    #             scale=spacing,
+    #             interpolation="nearest",
+    #             visible=False,
+    #         )
+    #     viewer.add_image(
+    #         fish_568_to_analyze,
+    #         name=ch_dict[FISH_568_CH] + "-analyzed-stretched-defloored-median",
+    #         colormap="magenta",
+    #         blending="additive",
+    #         scale=spacing,
+    #         interpolation="nearest",
+    #         visible=False,
+    #     )
 
     # Find FISH signatures within channels
     #! Hack to work with calibration data
