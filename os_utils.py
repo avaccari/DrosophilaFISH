@@ -11,12 +11,15 @@ def build_path(filename_root, suffix=None):
 
 
 def save(file, array):
-    print("saving data...", end='', flush=True)
+    print("saving data... ", end="", flush=True)
     with lzma.open(f"{file}.lzma", "wb") as f:
         np.save(f, array)
 
 
 def load(file):
-    print("loading data...", end='', flush=True)
+    if not os.path.exists(f"{file}.lzma"):
+        raise FileNotFoundError
+
+    print("loading data... ", end="", flush=True)
     with lzma.open(f"{file}.lzma", "rb") as f:
         return np.load(f)

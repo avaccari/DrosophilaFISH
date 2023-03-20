@@ -1,9 +1,10 @@
 import argparse
-
 import os
 import os.path as osp
 from tkinter import filedialog
 
+import colorama
+from colorama import Back, Fore, Style
 import matplotlib.pyplot as plt
 import napari
 import numpy as np
@@ -23,27 +24,30 @@ from magicgui import magicgui
 import os_utils
 from image import Image
 
+colorama.init()
 
 #! IMPORTANT FOR CONSISTENCY: add a flag so that if there is an exception with a
 #! file, all the following steps are re-evaluated instead of using stored values
 #! Check the "refresh" argument of the analyze_image() function.
 
 
-def contrast_stretch(data, in_range="image"):
-    print("Contrast stretching...", end="", flush=True)
-    input_min = data.min()
-    input_max = data.max()
-    input_median = np.median(data)
-    data = ski_exp.rescale_intensity(data, in_range)
-    scaled_min = data.min()
-    scaled_max = data.max()
-    scaled_median = np.median(data)
+def eval_stats(data, mask=None):
+    masked = data[mask] if mask is not None else data
+    return masked.min(), np.median(masked), masked.max()
+
+
+def contrast_stretch(data, in_range="image", mask=None, ch_id=None):
     print(
-        f" [{input_min}, {input_max}] => {in_range} => [{scaled_min}, {scaled_max}]... median: {input_median} => {scaled_median}... ",
+        f"Contrast stretching {Fore.GREEN}{Style.BRIGHT}{ch_id}{Style.RESET_ALL}... ",
         end="",
         flush=True,
     )
-    print("done!")
+    input_min, input_median, input_max = eval_stats(data, mask)
+    data = ski_exp.rescale_intensity(data, in_range)
+    scaled_min, scaled_median, scaled_max = eval_stats(data, mask)
+    print(
+        f"{Style.BRIGHT}[{input_min}, {input_median}, {input_max}] => {in_range} => [{scaled_min}, {scaled_median}, {scaled_max}]{Style.RESET_ALL}... done!"
+    )
     return data
 
 
@@ -65,7 +69,11 @@ def filter(
     if footprint is None:
         footprint = ski_mor.ball(1)
     footprint_dim = footprint.shape
-    print(f"Applying {type} filter...", end="", flush=True)
+    print(
+        f"Applying {Fore.BLUE}{type}{Style.RESET_ALL} filter to {Fore.GREEN}{Style.BRIGHT}{ch_id}{Style.RESET_ALL}... ",
+        end="",
+        flush=True,
+    )
 
     if filename_root is None:
         if type == "closing":
@@ -129,12 +137,23 @@ def filter(
     return filtered
 
 
-def remove_floor(data, sigma=(20, 100, 100), filename_root=None, ch_id=None):
+def remove_floor(data, sigma=(20, 100, 100), filename_root=None, ch_id=None, mask=None):
+    print(f"Removing floor from {Fore.GREEN}{Style.BRIGHT}{ch_id}{Style.RESET_ALL}:")
+    input_min, input_median, input_max = eval_stats(data, mask=mask)
+    print(
+        f"Input range: {Style.BRIGHT}[{input_min}, {input_median}, {input_max}]{Style.RESET_ALL}"
+    )
     noise_floor = filter(
         data, type="gaussian", sigma=sigma, filename_root=filename_root, ch_id=ch_id
     )
     defloored = data.astype("int16") - noise_floor.astype("int16")
-    return np.maximum(defloored, 0).astype("uint8")
+    defloored = np.maximum(defloored, 0).astype("uint8")
+    defloored_min, defloored_median, defloored_max = eval_stats(defloored, mask=mask)
+    print(
+        f"Output range: {Style.BRIGHT}[{defloored_min}, {defloored_median}, {defloored_max}]{Style.RESET_ALL}"
+    )
+
+    return defloored
 
 
 def detect_blobs(
@@ -148,7 +167,7 @@ def detect_blobs(
     filename_root=None,
     ch_id=None,
 ):
-    print("Detecting blobs' centers...", end="", flush=True)
+    print("Detecting blobs' centers... ", end="", flush=True)
     if z_y_x_ratio is not None:
         min_sigma = min_sigma * np.array(z_y_x_ratio)
         max_sigma = max_sigma * np.array(z_y_x_ratio)
@@ -208,7 +227,11 @@ def evaluate_voronoi(mask, markers, spacing=(1, 1, 1), filename_root=None, ch_id
     # Find the equivalent to Voronoi regions in the provided mask based on the
     # provided markers
     # Coordinates are normalized to the physical size using 'spacing'
-    print("Identifying regions within mask with Vornoi...", end="", flush=True)
+    print(
+        f"Identifying regions within {Fore.GREEN}{Style.BRIGHT}{ch_id}{Style.RESET_ALL}'s mask with Vornoi... ",
+        end="",
+        flush=True,
+    )
     if filename_root is None:
         labels = _evaluate_voronoi(mask, markers, spacing)
     elif ch_id is None:
@@ -253,7 +276,11 @@ def _evaluate_watershed(mask, markers):
 
 def evaluate_watershed(mask, markers, filename_root=None, ch_id=None):
     # Use watershed to identify regions connected to the nuclei centers
-    print("Identifying regions within mask with watershed...", end="", flush=True)
+    print(
+        f"Identifying regions within {Fore.GREEN}{Style.BRIGHT}{ch_id}{Style.RESET_ALL}'s mask with watershed... ",
+        end="",
+        flush=True,
+    )
 
     if filename_root is None:
         labels = _evaluate_watershed(mask, markers)
@@ -335,7 +362,7 @@ def _get_fish_puncta(
                 df.loc[:, "nucleus"] = lbl
                 detections_at_thrs[lbl] = df
 
-            print(f"Detected {len(df)} puncta")
+            print(f"Detected {Fore.BLUE}{len(df)} puncta{Style.RESET_ALL}")
 
         # Assumption: if there are no detections at a given threshold, there
         # will be none at higher thresholds.
@@ -468,18 +495,18 @@ def analyze_image(
     visualize=False,
     channels=4,
     refresh=False,
-    only_metadata=False,
+    metadata=False,
     fish_range=None,
 ):
     # Ask user to choose a file
-    print("\n--- Starting new analysis ---")
+    print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}")
     if filename is None:
         filename = filedialog.askopenfilename()
         if filename == "":
             raise ValueError("A .czi file should be provided for analysis.")
 
     # Load image and extract data and metadata
-    print(f"Loading file {filename}")
+    print(f"Loading file {Style.BRIGHT}{Fore.GREEN}{filename}{Style.RESET_ALL}")
     image = Image(filename)
     image.load_image()
     data = image.get_data()
@@ -489,6 +516,12 @@ def analyze_image(
     # dde = [np.ceil(d - d//4).astype('uint16') for d in data.shape]
     # data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
     # -------------------------------------
+
+    # TODO: check the size of the data and compare with the requested number
+    # TODO: of channels. Decided what to do if there is a mismatch.
+    # TODO: Maybe start with an assumption based on our data so that depending
+    # TODO: on the number of channels in the data we use a particular
+    # TODO: configuration.
 
     # Specify channels
     #! This is a hack to make it work with the calibration data
@@ -517,7 +550,7 @@ def analyze_image(
         raise ValueError("Number of channels not allowed.")
 
     # Specify thresholds for FISH detection
-    FISH_THRESHOLD_MIN = 5
+    FISH_THRESHOLD_MIN = 10
     FISH_THRESHOLD_MAX = 251
     FISH_THRESHOLD_STEP = 5
 
@@ -526,33 +559,46 @@ def analyze_image(
     spacing = pixel_sizes
     spacing_ratio = int(np.ceil(spacing[0] / spacing[1]))
     contrast = [[np.min(data[ch]), np.max(data[ch])] for ch in range(data.shape[0])]
-    print("Original data info:")
-    print(f"- Image shape (CH, Z, Y, X): {data.shape}")
-    print(f"- Pixel sizes (Z, Y, X): {spacing}")
-    print(f"  - Spacing ratio (Z / X, Y): {spacing_ratio}")
-    print(f"- Data type: {image.type_meta}")
-    print(f"- Data range (per channel): {contrast}")
-    print(f"- Channels: {image.channels_meta} => ({list(ch_dict.values())})")
+    print(
+        f"{Style.BRIGHT}{Fore.BLUE}########## Original data info: ##########{Style.RESET_ALL}"
+    )
+    print(f"{Style.BRIGHT}Image shape (CH, Z, Y, X):{Style.RESET_ALL}")
+    print(f"  {data.shape}")
+    print(f"{Style.BRIGHT}Channels:{Style.RESET_ALL}")
+    for (k, v), c in zip(image.channels_meta.items(), list(ch_dict.values())):
+        print(f"  {k}: {c:9} <=> {v}")
+    print(f"{Style.BRIGHT}Pixel sizes (Z, Y, X):{Style.RESET_ALL}")
+    print(f"  {spacing}")
+    print(f"{Style.BRIGHT}Spacing ratio (Z / X or Y):")
+    print(f"  {spacing_ratio}")
+    print(f"{Style.BRIGHT}Data type:{Style.RESET_ALL}")
+    for k, v in image.type_meta.items():
+        print(f"  {k} => {v}")
+    print(f"{Style.BRIGHT}Data ranges:{Style.RESET_ALL}")
+    for (k, v), r in zip(list(ch_dict.items()), contrast):
+        print(f"  {k}: {v:9} => {r}")
+
+    print(
+        f"{Style.BRIGHT}{Fore.BLUE}#########################################{Style.RESET_ALL}"
+    )
 
     # Stop if we only want the metadata
-    if only_metadata:
+    if metadata:
         return
 
     # Contrast stretch nuclei and cyto
     for ch in (NUCLEI_CH, CYTO_CH):
-        print(f"Processing channel {ch_dict[ch]}:")
-        data[ch] = contrast_stretch(data[ch])
+        data[ch] = contrast_stretch(data[ch], ch_id=ch_dict[ch])
 
     # Contrast stretch the FISH channels
     #! This is a hack to make it work with the calibration data
     if channels == 3:
         ch = FISH_568_CH
-        print(f"Processing channel {ch_dict[ch]}:")
         if fish_range is None:
-            data[ch] = contrast_stretch(data[ch])
+            data[ch] = contrast_stretch(data[ch], ch_id=ch_dict[ch])
         else:
             data[ch] = contrast_stretch(
-                data[ch], in_range=(fish_range[0], fish_range[1])
+                data[ch], in_range=(fish_range[0], fish_range[1]), ch_id=ch_dict[ch]
             )
     elif channels == 4:
         min_intensity, max_intensity = np.inf, -np.inf
@@ -563,36 +609,31 @@ def analyze_image(
             max_intensity, data[FISH_568_CH].max(), data[FISH_647_CH].max()
         )
         for ch in (FISH_647_CH, FISH_568_CH):
-            print(f"Processing channel {ch_dict[ch]}:")
             if fish_range is None:
                 data[ch] = contrast_stretch(
-                    data[ch], in_range=(min_intensity, max_intensity)
+                    data[ch], in_range=(min_intensity, max_intensity), ch_id=ch_dict[ch]
                 )
             else:
                 data[ch] = contrast_stretch(
                     data[ch],
                     in_range=(fish_range[0], fish_range[1]),
+                    ch_id=ch_dict[ch],
                 )
 
     # If needed, convert to uint8
     if data.dtype != "uint8":
         for ch in range(data.shape[0]):
             print(
-                f"Converting {ch_dict[ch]} from uint16 to uint8...", end="", flush=True
-            )
-            input_min = data[ch].min()
-            input_max = data[ch].max()
-            input_median = np.median(data[ch])
-            data[ch] = data[ch] // 256
-            converted_min = data[ch].min()
-            converted_max = data[ch].max()
-            converted_median = np.median(data[ch])
-            print(
-                f" [{input_min}, {input_max}] => [{converted_min}, {converted_max}]... median: {input_median} => {converted_median}... ",
+                f"Converting {Fore.GREEN}{Style.BRIGHT}{ch_dict[ch]}{Style.RESET_ALL} from uint16 to uint8...",
                 end="",
                 flush=True,
             )
-            print("done!")
+            input_min, input_median, input_max = eval_stats(data[ch])
+            data[ch] = data[ch] // 256
+            converted_min, converted_median, converted_max = eval_stats(data[ch])
+            print(
+                f" {Style.BRIGHT}[{input_min}, {input_median}, {input_max}] => [{converted_min}, {converted_median}, {converted_max}]{Style.RESET_ALL}... done!"
+            )
         data = data.astype("uint8")
 
     # Show original data
@@ -613,7 +654,6 @@ def analyze_image(
 
     # Remove floor from each channel
     for ch in range(data.shape[0]):
-        print(f"Removing floor from channel {ch_dict[ch]}:")
         data[ch] = remove_floor(
             data[ch],
             sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
@@ -623,15 +663,13 @@ def analyze_image(
 
     # Contrast stretch nuclei and cyto
     for ch in (NUCLEI_CH, CYTO_CH):
-        print(f"Processing channel {ch_dict[ch]}:")
-        data[ch] = contrast_stretch(data[ch])
+        data[ch] = contrast_stretch(data[ch], ch_id=ch_dict[ch])
 
     # Contrast stretch the FISH channels
     #! This is a hack to make it work with the calibration data
     if channels == 3:
         ch = FISH_568_CH
-        print(f"Processing channel {ch_dict[ch]}:")
-        data[ch] = contrast_stretch(data[ch])
+        data[ch] = contrast_stretch(data[ch], ch_id=ch_dict[ch])
     elif channels == 4:
         min_intensity, max_intensity = np.inf, -np.inf
         min_intensity = min(
@@ -641,9 +679,8 @@ def analyze_image(
             max_intensity, data[FISH_568_CH].max(), data[FISH_647_CH].max()
         )
         for ch in (FISH_647_CH, FISH_568_CH):
-            print(f"Processing channel {ch_dict[ch]}:")
             data[ch] = contrast_stretch(
-                data[ch], in_range=(min_intensity, max_intensity)
+                data[ch], in_range=(min_intensity, max_intensity), ch_id=ch_dict[ch]
             )
     if visualize:
         # Show pre-processed data
@@ -679,7 +716,7 @@ def analyze_image(
         )
 
     # Semantic segmentation to identify all nuclei
-    print("Thresholding nuclei...", end="", flush=True)
+    print("Thresholding nuclei... ", end="", flush=True)
     nuclei_mask = nuclei_den > ski_fil.threshold_otsu(nuclei_den)
     # TODO: try the minimum error thresholding:
     #       http://www.cyto.purdue.edu/cdroms/micro2/content/education/wirth04.pdf
@@ -736,7 +773,9 @@ def analyze_image(
     #     )
     # nuclei_ctrs_df['ID'] = range(1, 1 + len(nuclei_ctrs))
 
-    print(f"Detected {len(nuclei_ctrs)} centers:\n{nuclei_ctrs}")
+    print(
+        f"Detected {Style.BRIGHT}{len(nuclei_ctrs)}{Style.RESET_ALL} centers:\n{nuclei_ctrs}"
+    )
 
     if visualize:
         viewer.add_points(
@@ -789,7 +828,7 @@ def analyze_image(
         )
 
     # Final labeled nuclei mask (no cytoplasm)
-    print("Combining Vornoi and watershed nuclei's labeling...", end="", flush=True)
+    print("Combining Vornoi and watershed nuclei's labeling... ", end="", flush=True)
     nuclei_labels = nuclei_labels_voronoi.copy()
     nuclei_labels[nuclei_labels_voronoi != nuclei_labels_watershed] = 0
     if visualize:
@@ -845,7 +884,7 @@ def analyze_image(
         )
 
     # Semantic segmentation to identify all cytoplasm
-    print("Thresholding cytoplasm...", end="", flush=True)
+    print("Thresholding cytoplasm... ", end="", flush=True)
     cyto_mask = cyto_closed > 0
     if visualize:
         viewer.add_image(
@@ -861,7 +900,7 @@ def analyze_image(
     print("done!")
 
     # Invert the cytoplasm mask to identify potential nuclei
-    print("Inverting cytoplasm mask...", end="", flush=True)
+    print("Inverting cytoplasm mask... ", end="", flush=True)
     cyto_mask_inv = ~cyto_mask
     if visualize:
         viewer.add_image(
@@ -912,7 +951,7 @@ def analyze_image(
 
     # Final labeled nuclei mask (with cytoplasm)
     print(
-        "Combining nuclei's labeling with inverse cytoplasm labeling...",
+        "Combining nuclei's labeling with inverse cytoplasm labeling... ",
         end="",
         flush=True,
     )
@@ -947,8 +986,8 @@ def analyze_image(
     nuclei_labels = filter(
         nuclei_labels,
         type="maximum",
-        # footprint=ski_mor.ball(5)[2::3],
-        footprint=ski_mor.ball(7)[3::4],
+        footprint=ski_mor.ball(5)[2::3],
+        # footprint=ski_mor.ball(7)[3::4],
         # footprint=ski_mor.ball(9)[1::4],
         filename_root=filename,
         ch_id=ch_dict[NUCLEI_CH],
@@ -961,11 +1000,12 @@ def analyze_image(
             blending="additive",
             visible=False,
         )
+    nuclei_labels_mask = nuclei_labels > 0
     ################################################################################
 
     # Evaluate potential nuclei properties
     # TODO: consider adding the detected centers and sigmas
-    print("Evaluating potential nuclei properties from mask...", end="", flush=True)
+    print("Evaluating potential nuclei properties from mask... ", end="", flush=True)
     nuclei_props_df = pd.DataFrame(
         ski_mea.regionprops_table(
             nuclei_labels,
@@ -986,44 +1026,38 @@ def analyze_image(
     print("Nuclei's properties:\n", nuclei_props_df)
 
     # Identify FISH puncta
-    print("Identifying FISH puncta's centers within nuclei's bboxes...")
+    print("Identifying FISH puncta's centers within nuclei...")
     # To minimize difference between channels, we are pre-building the images
     # with just the region that we will analyze and then contrast stretch
     # globally. This should normalize the puncta intensity among channels as
     # well as within the channels. Contrast stretching individual nuclei
     # area would be equivalent to use non uniform detection thresholds.
-    print("Building images to analyze for FISH puncta:")
+
+    # Extract the subset of values from teh FISH channels within the identifies
+    # nuclei bounding boxes and calculate extremes
     #! Hack to work with calibration data
     if channels == 4:
-        fish_647_to_analyze = np.zeros_like(data[FISH_647_CH])
-    fish_568_to_analyze = np.zeros_like(data[FISH_568_CH])
-    min_intensity, max_intensity = np.inf, -np.inf
-    for _, row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
-        sl = row["slice"]
-        #! Hack to work with calibration data
-        if channels == 4:
-            slice_647 = data[FISH_647_CH, sl[0], sl[1], sl[2]]
-        slice_568 = data[FISH_568_CH, sl[0], sl[1], sl[2]]
-        #! Hack to work with calibration data
-        if channels == 4:
-            min_intensity = min(min_intensity, slice_647.min(), slice_568.min())
-            max_intensity = max(max_intensity, slice_647.max(), slice_568.max())
-        else:
-            min_intensity = min(min_intensity, slice_568.min())
-            max_intensity = max(max_intensity, slice_568.max())
-        #! Hack to work with calibration data
-        if channels == 4:
-            fish_647_to_analyze[sl[0], sl[1], sl[2]] = slice_647
-        fish_568_to_analyze[sl[0], sl[1], sl[2]] = slice_568
+        sub = data[[FISH_568_CH, FISH_647_CH]][np.stack([nuclei_labels_mask] * 2)]
+    else:
+        sub = data[FISH_568_CH][nuclei_labels_mask]
+
+    min_intensity = sub.min()
+    max_intensity = sub.max()
+
+    # Contrast stretch the FISH channels using the evaluated extrema
     #! Hack to work with calibration data
     if channels == 4:
-        print(f"Processing channel {ch_dict[FISH_647_CH]}:")
         fish_647_to_analyze = contrast_stretch(
-            fish_647_to_analyze, in_range=(min_intensity, max_intensity)
+            data[FISH_647_CH],
+            in_range=(min_intensity, max_intensity),
+            mask=nuclei_labels_mask,
+            ch_id=ch_dict[FISH_647_CH],
         )
-    print(f"Processing channel {ch_dict[FISH_568_CH]}:")
     fish_568_to_analyze = contrast_stretch(
-        fish_568_to_analyze, in_range=(min_intensity, max_intensity)
+        data[FISH_568_CH],
+        in_range=(min_intensity, max_intensity),
+        mask=nuclei_labels_mask,
+        ch_id=ch_dict[FISH_568_CH],
     )
 
     if visualize:
@@ -1031,7 +1065,7 @@ def analyze_image(
         if channels == 4:
             viewer.add_image(
                 fish_647_to_analyze,
-                name=ch_dict[FISH_647_CH] + "-analyzed",
+                name=ch_dict[FISH_647_CH] + "-analyzed-stretched",
                 colormap="magenta",
                 blending="additive",
                 scale=spacing,
@@ -1040,7 +1074,93 @@ def analyze_image(
             )
         viewer.add_image(
             fish_568_to_analyze,
-            name=ch_dict[FISH_568_CH] + "-analyzed",
+            name=ch_dict[FISH_568_CH] + "-analyzed-stretched",
+            colormap="magenta",
+            blending="additive",
+            scale=spacing,
+            interpolation="nearest",
+            visible=False,
+        )
+
+    # Remove floor from FISH channels
+    # Using a kernel about 3 times the size of the puncta
+    if channels == 4:
+        fish_647_to_analyze = remove_floor(
+            fish_647_to_analyze,
+            sigma=15 * np.array((1 / spacing_ratio, 1, 1)),
+            filename_root=filename,
+            ch_id=ch_dict[FISH_647_CH],
+            mask=nuclei_labels_mask,
+        )
+    fish_568_to_analyze = remove_floor(
+        fish_568_to_analyze,
+        sigma=15 * np.array((1 / spacing_ratio, 1, 1)),
+        filename_root=filename,
+        ch_id=ch_dict[FISH_568_CH],
+        mask=nuclei_labels_mask,
+    )
+
+    if visualize:
+        #! Hack to work with calibration data
+        if channels == 4:
+            viewer.add_image(
+                fish_647_to_analyze,
+                name=ch_dict[FISH_647_CH] + "-analyzed-stretched-defloored",
+                colormap="magenta",
+                blending="additive",
+                scale=spacing,
+                interpolation="nearest",
+                visible=False,
+            )
+        viewer.add_image(
+            fish_568_to_analyze,
+            name=ch_dict[FISH_568_CH] + "-analyzed-stretched-defloored",
+            colormap="magenta",
+            blending="additive",
+            scale=spacing,
+            interpolation="nearest",
+            visible=False,
+        )
+
+    # Apply median filter to denoise the FISH channels
+    #! Hack to work with calibration data
+    if channels == 4:
+        fish_647_to_analyze = filter(
+            fish_647_to_analyze,
+            # footprint=ski_mor.ball(1),
+            # footprint=ski_mor.ball(2)[1:4],
+            # footprint=ski_mor.ball(3)[1::2],
+            # footprint=ski_mor.ball(5)[2::3],
+            footprint=ski_mor.ball(7)[3::4],
+            filename_root=filename,
+            ch_id=ch_dict[FISH_647_CH],
+        )
+    fish_568_to_analyze = filter(
+        fish_568_to_analyze,
+        # footprint=ski_mor.ball(1),
+        # footprint=ski_mor.ball(2)[1:4],
+        # footprint=ski_mor.ball(3)[1::2],
+        # footprint=ski_mor.ball(5)[2::3],
+        footprint=ski_mor.ball(7)[3::4],
+        filename_root=filename,
+        ch_id=ch_dict[FISH_568_CH],
+    )
+
+    if visualize:
+        #! Hack to work with calibration data
+        if channels == 4:
+            viewer.add_image(
+                fish_647_to_analyze,
+                name=ch_dict[FISH_647_CH] + "-analyzed-stretched-defloored-median",
+                colormap="magenta",
+                blending="additive",
+                scale=spacing,
+                interpolation="nearest",
+                visible=False,
+            )
+        viewer.add_image(
+            fish_568_to_analyze,
+            name=ch_dict[FISH_568_CH] + "-analyzed-stretched-defloored-median",
             colormap="magenta",
             blending="additive",
             scale=spacing,
@@ -1441,7 +1561,7 @@ if __name__ == "__main__":
         default=4,
     )
     parser.add_argument(
-        "--only_metadata",
+        "--metadata",
         help="Only retrieve and display the metadata of the CZI file.",
         default=False,
         action="store_true",
@@ -1462,7 +1582,7 @@ if __name__ == "__main__":
         visualize=args.visualize,
         refresh=args.refresh,
         channels=args.channels,
-        only_metadata=args.only_metadata,
+        metadata=args.metadata,
         fish_range=args.fish_range,
     )
 
