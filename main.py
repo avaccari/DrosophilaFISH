@@ -23,6 +23,7 @@ from magicgui import magicgui
 
 import os_utils
 from image import Image
+from metadata import Metadata
 
 colorama.init()
 
@@ -64,11 +65,12 @@ def filter(
     filtered = data.copy()
 
     if type not in ["median", "gaussian", "closing", "maximum"]:
-        print("WARNING: the specified mode is not available.")
+        raise ValueError("WARNING: the specified mode is not available.")
 
     if footprint is None:
         footprint = ski_mor.ball(1)
     footprint_dim = footprint.shape
+
     print(
         f"Applying {Fore.BLUE}{type}{Style.RESET_ALL} filter to {Fore.GREEN}{Style.BRIGHT}{ch_id}{Style.RESET_ALL}... ",
         end="",
@@ -87,9 +89,7 @@ def filter(
                 data, mode=mode, cval=cval, footprint=footprint
             )
     elif ch_id is None:
-        print(
-            "WARNING: a ch_id should be provided to identify the channel. The data was not filtered."
-        )
+        raise ValueError("WARNING: a ch_id should be provided to identify the channel.")
     else:
         if type == "closing":
             file = os_utils.build_path(
@@ -132,6 +132,7 @@ def filter(
                 os_utils.save(file, filtered)
             except:
                 print("WARNING: error saving the file.")
+
     print("done!")
 
     return filtered
@@ -140,9 +141,6 @@ def filter(
 def remove_floor(data, sigma=(20, 100, 100), filename_root=None, ch_id=None, mask=None):
     print(f"Removing floor from {Fore.GREEN}{Style.BRIGHT}{ch_id}{Style.RESET_ALL}:")
     input_min, input_median, input_max = eval_stats(data, mask=mask)
-    print(
-        f"Input range: {Style.BRIGHT}[{input_min}, {input_median}, {input_max}]{Style.RESET_ALL}"
-    )
     noise_floor = filter(
         data, type="gaussian", sigma=sigma, filename_root=filename_root, ch_id=ch_id
     )
@@ -150,7 +148,7 @@ def remove_floor(data, sigma=(20, 100, 100), filename_root=None, ch_id=None, mas
     defloored = np.maximum(defloored, 0).astype("uint8")
     defloored_min, defloored_median, defloored_max = eval_stats(defloored, mask=mask)
     print(
-        f"Output range: {Style.BRIGHT}[{defloored_min}, {defloored_median}, {defloored_max}]{Style.RESET_ALL}"
+        f"{Style.BRIGHT}[{input_min}, {input_median}, {input_max}] => [{defloored_min}, {defloored_median}, {defloored_max}]{Style.RESET_ALL}"
     )
 
     return defloored
@@ -321,12 +319,12 @@ def _get_fish_puncta(
     props_df = pd.DataFrame()
     for threshold in range(thresh_min, thresh_max, thresh_step):
         detections_at_thrs = {}
-        for idx, row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
-            lbl = row["label"]
+        for n_idx, n_row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
+            lbl = n_row["label"]
             print(
-                f"--- Ch: {ch_id} - Thrs: {threshold} - {idx + 1:2} / {len(nuclei_props_df):2} (lbl: {lbl:2}) ---"
+                f"--- Ch: {ch_id} - Thrs: {threshold} - {n_idx + 1:2} / {len(nuclei_props_df):2} (lbl: {lbl:2}) ---"
             )
-            sl = row["slice"]
+            sl = n_row["slice"]
 
             # Find 647 blobs locations within the bbox, mask, and shift coordinates
             # TODO: consider using a range of sigmas and then Frangi to preserve the most blobby
@@ -346,11 +344,11 @@ def _get_fish_puncta(
             if not df.empty:
                 # Drop detections that are not inside this particular nucleus
                 df.loc[:, "keep"] = False
-                for idx, row in df.iterrows():
-                    coo = row[["Z", "Y", "X"]].astype("uint16")
+                for d_idx, d_row in df.iterrows():
+                    coo = d_row[["Z", "Y", "X"]].astype("uint16")
                     label = nuclei_labels[coo[0], coo[1], coo[2]]
                     if label != 0 and label == lbl:
-                        df.at[idx, "keep"] = True
+                        df.at[d_idx, "keep"] = True
                 df = df[df["keep"]].drop(columns=["keep"])
 
                 # If multiple nuclei regions with same label, concatenate detections
@@ -362,7 +360,9 @@ def _get_fish_puncta(
                 df.loc[:, "nucleus"] = lbl
                 detections_at_thrs[lbl] = df
 
-            print(f"Detected {Fore.BLUE}{len(df)} puncta{Style.RESET_ALL}")
+            print(
+                f"Detected {Fore.BLUE}{len(df)} puncta{Style.RESET_ALL} ({len(df) / n_row['area']:.4f} puncta/pixel)"
+            )
 
         # Assumption: if there are no detections at a given threshold, there
         # will be none at higher thresholds.
@@ -393,9 +393,9 @@ def _get_fish_puncta(
                 * (spacing_ratio, 1, 1)
             )
             detections_at_thrs_df.loc[:, "label"] = closest_detection[1] + 1
-            for _, row in detections_at_thrs_df.iterrows():
+            for _, n_row in detections_at_thrs_df.iterrows():
                 fish_puncta_df.loc[
-                    fish_puncta_df["label"] == row["label"], "thresholds"
+                    fish_puncta_df["label"] == n_row["label"], "thresholds"
                 ].iat[0] += [threshold]
 
         # Create a dataframe with the detections for the current thresholds
@@ -497,6 +497,7 @@ def analyze_image(
     refresh=False,
     metadata=False,
     fish_range=None,
+    no_cyto=False,
 ):
     # Ask user to choose a file
     print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}")
@@ -517,16 +518,21 @@ def analyze_image(
     # data = data[:, dds[1]:dde[1], dds[2]:dde[2], dds[3]:dde[3]]
     # -------------------------------------
 
-    # TODO: check the size of the data and compare with the requested number
-    # TODO: of channels. Decided what to do if there is a mismatch.
-    # TODO: Maybe start with an assumption based on our data so that depending
-    # TODO: on the number of channels in the data we use a particular
-    # TODO: configuration.
+    # Check if the number of required channels corresponds to the channels in
+    # the image.
+    if channels != image.channels_no:
+        raise ValueError(
+            f"Number of required channels ({channels}) does not correspond to channels in the image ({image.channels_no})."
+        )
 
     # Specify channels
-    #! This is a hack to make it work with the calibration data
+    #! This works with our data only
     # TODO: since it can change from image to image, do it through metadata
     if channels == 4:
+        if no_cyto:
+            raise ValueError(
+                f"Configuration of channels ({channels}) and no_cyto ({no_cyto}) not supported."
+            )
         NUCLEI_CH = 0
         FISH_647_CH = 1
         FISH_568_CH = 2
@@ -538,16 +544,26 @@ def analyze_image(
             CYTO_CH: "Cytoplasm",
         }
     elif channels == 3:
-        NUCLEI_CH = 0
-        FISH_568_CH = 1
-        CYTO_CH = 2
-        ch_dict = {
-            NUCLEI_CH: "Nuclei",
-            FISH_568_CH: "FISH_568",
-            CYTO_CH: "Cytoplasm",
-        }
+        if no_cyto:
+            NUCLEI_CH = 0
+            FISH_647_CH = 1
+            FISH_568_CH = 2
+            ch_dict = {
+                NUCLEI_CH: "Nuclei",
+                FISH_647_CH: "FISH_647",
+                FISH_568_CH: "FISH_568",
+            }
+        else:
+            NUCLEI_CH = 0
+            FISH_568_CH = 1
+            CYTO_CH = 2
+            ch_dict = {
+                NUCLEI_CH: "Nuclei",
+                FISH_568_CH: "FISH_568",
+                CYTO_CH: "Cytoplasm",
+            }
     else:
-        raise ValueError("Number of channels not allowed.")
+        raise ValueError(f"Number of channels ({channels}) not allowed.")
 
     # Specify thresholds for FISH detection
     FISH_THRESHOLD_MIN = 5
@@ -591,7 +607,7 @@ def analyze_image(
         data[ch] = contrast_stretch(data[ch], ch_id=ch_dict[ch])
 
     # Contrast stretch the FISH channels
-    #! This is a hack to make it work with the calibration data
+    #! This works with our data only
     if channels == 3:
         ch = FISH_568_CH
         if fish_range is None:
@@ -666,7 +682,7 @@ def analyze_image(
         data[ch] = contrast_stretch(data[ch], ch_id=ch_dict[ch])
 
     # Contrast stretch the FISH channels
-    #! This is a hack to make it work with the calibration data
+    #! This works with our data only
     if channels == 3:
         ch = FISH_568_CH
         data[ch] = contrast_stretch(data[ch], ch_id=ch_dict[ch])
@@ -841,7 +857,7 @@ def analyze_image(
         )
     print("done!")
 
-    #! Right now this assumes the cytoplasm channel exists.
+    #! This works with our data only
     # TODO: The following should be done only if the cytoplasm channel exist.
     # TODO: Use metadata?
     # Apply median filter to denoise the cytoplasm channel
@@ -1035,7 +1051,7 @@ def analyze_image(
 
     # Extract the subset of values from teh FISH channels within the identifies
     # nuclei bounding boxes and calculate extremes
-    #! Hack to work with calibration data
+    #! This works with our data only
     if channels == 4:
         sub = data[[FISH_568_CH, FISH_647_CH]][np.stack([nuclei_labels_mask] * 2)]
     else:
@@ -1045,7 +1061,7 @@ def analyze_image(
     max_intensity = sub.max()
 
     # Contrast stretch the FISH channels using the evaluated extrema
-    #! Hack to work with calibration data
+    #! This works with our data only
     if channels == 4:
         fish_647_to_analyze = contrast_stretch(
             data[FISH_647_CH],
@@ -1061,7 +1077,7 @@ def analyze_image(
     )
 
     if visualize:
-        #! Hack to work with calibration data
+        #! This works with our data only
         if channels == 4:
             viewer.add_image(
                 fish_647_to_analyze,
@@ -1101,7 +1117,7 @@ def analyze_image(
     )
 
     if visualize:
-        #! Hack to work with calibration data
+        #! This works with our data only
         if channels == 4:
             viewer.add_image(
                 fish_647_to_analyze,
@@ -1123,7 +1139,7 @@ def analyze_image(
         )
 
     # # Apply median filter to denoise the FISH channels
-    # #! Hack to work with calibration data
+    # #! This works with our data only
     # if channels == 4:
     #     fish_647_to_analyze = filter(
     #         fish_647_to_analyze,
@@ -1147,7 +1163,7 @@ def analyze_image(
     # )
 
     # if visualize:
-    #     #! Hack to work with calibration data
+    # #! This works with our data only
     #     if channels == 4:
     #         viewer.add_image(
     #             fish_647_to_analyze,
@@ -1169,7 +1185,7 @@ def analyze_image(
     #     )
 
     # Find FISH signatures within channels
-    #! Hack to work with calibration data
+    #! This works with our data only
     if channels == 4:
         fish_647_puncta_df, props_647_df = get_fish_puncta(
             fish_647_to_analyze,
@@ -1195,7 +1211,7 @@ def analyze_image(
     )
 
     # Merge to nuclei props dataframe
-    #! Hack to work with calibration data
+    #! This works with our data only
     if channels == 4:
         nuclei_props_df = nuclei_props_df.merge(props_647_df, on="label", how="left")
     nuclei_props_df = nuclei_props_df.merge(props_568_df, on="label", how="left")
@@ -1218,7 +1234,7 @@ def analyze_image(
 
     if visualize:
         # Visualize puncta
-        #! Hack to work with calibration data
+        #! This works with our data only
         if channels == 4:
             pts_647 = viewer.add_points(
                 fish_647_puncta_df[["Z", "Y", "X"]].to_numpy(),
@@ -1255,7 +1271,7 @@ def analyze_image(
         pts_568.features["thresholds"] = fish_568_puncta_df["thresholds"]
 
         # Create a widget to control threshold for puncta visualization
-        #! Hack to work with calibration data
+        #! This works with our data only
         if channels == 4:
             selected_thresholds = {
                 ch_dict[FISH_647_CH] + "-puncta": FISH_THRESHOLD_MIN,
@@ -1281,7 +1297,7 @@ def analyze_image(
                 selected_thresholds[layer.name] = threshold
                 layer.shown = [threshold in f for f in layer.features["thresholds"]]
 
-        #! Hack to work with calibration data
+        #! This works with our data only
         if channels == 4:
 
             @magicgui(call_button="Display FISH")
@@ -1352,7 +1368,8 @@ def analyze_image(
         # Add the widgets
         viewer.window.add_dock_widget(threshold_puncta)
         viewer.window.add_dock_widget(export_fish)
-        #! Hack to work with calibration data
+
+        #! This works with our data only
         if channels == 4:
             viewer.window.add_dock_widget(display_fish)
 
@@ -1543,26 +1560,26 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--visualize",
-        help="Display analysis results using napari.",
+        help="Display analysis results using napari. (Default: False)",
         default=False,
         action="store_true",
     )
     parser.add_argument(
         "--refresh",
-        help="Don't use and refresh existing stored analysis.",
+        help="Don't use and refresh existing stored analysis. (Default: False)",
         default=False,
         action="store_true",
     )
     parser.add_argument(
         "--channels",
-        help="Specify the number of channels inside the CZI file.",
+        help="Specify the number of channels inside the CZI file. (Default: 4 - Range: 3 -> 4)",
         type=int,
         choices=range(3, 5),
         default=4,
     )
     parser.add_argument(
         "--metadata",
-        help="Only retrieve and display the metadata of the CZI file.",
+        help="Only retrieve and display the metadata of the CZI file. (Default: False)",
         default=False,
         action="store_true",
     )
@@ -1570,6 +1587,12 @@ if __name__ == "__main__":
         "--fish_range",
         help="Range (min, max) to use for the initial FISH contrast stretching. If not specified, the values will be extracted from each channel.",
         default=None,
+    )
+    parser.add_argument(
+        "--no_cyto",
+        help="Specifies that the cytoplasm channel is not available. (Default: False)",
+        default=False,
+        action="store_true",
     )
 
     args = parser.parse_args()
@@ -1584,6 +1607,7 @@ if __name__ == "__main__":
         channels=args.channels,
         metadata=args.metadata,
         fish_range=args.fish_range,
+        no_cyto=args.no_cyto,
     )
 
     # files = [

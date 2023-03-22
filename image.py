@@ -39,12 +39,12 @@ class Image:
             self.scaling = self.metadata["scaling_z_y_x"]
             self.scale_ratio = np.asarray(self.scaling) / min(self.scaling)
             self.channels_meta = self.metadata["channels"]
+            self.channels_no = len(self.channels_meta)
             self.type_meta = self.metadata["image_type"]
-            
 
             # NOTE: Temporary removed until fully implemented in main.py
             # self.channels = []
-            # for ch in range(len(self.channels_meta)):
+            # for ch in range(self.channels_no):
             #     self.channels.append(
             #         Channel(self.data[ch], self.scaling, self.channels_meta[ch])
             #     )
