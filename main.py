@@ -29,7 +29,7 @@ colorama.init()
 
 #! IMPORTANT FOR CONSISTENCY: add a flag so that if there is an exception with a
 #! file, all the following steps are re-evaluated instead of using stored values
-#! Check the "refresh" argument of the analyze_image() function.
+#! Implement the "overwrite" arguments in the analyze_image() function.
 
 
 def eval_stats(data, mask=None):
@@ -494,10 +494,10 @@ def analyze_image(
     filename=None,
     visualize=False,
     channels=4,
-    refresh=False,
     metadata=False,
     fish_range=None,
     no_cyto=False,
+    overwrite_json=False,
 ):
     # Ask user to choose a file
     print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}")
@@ -772,7 +772,7 @@ def analyze_image(
     # Detect the centers of the nuclei
     print("Detecting nuclei's centers:")
     nuclei_ctrs = detect_blobs(
-        nuclei_den.astype("float"),
+        nuclei_den,
         min_sigma=25,
         max_sigma=25,
         num_sigma=1,
@@ -1549,8 +1549,6 @@ def analyze_image(
 # #          A.v.O. (a.oudenaarden@hubrecht.eu))
 
 
-from glob import glob
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -1561,12 +1559,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--visualize",
         help="Display analysis results using napari. (Default: False)",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--refresh",
-        help="Don't use and refresh existing stored analysis. (Default: False)",
         default=False,
         action="store_true",
     )
@@ -1594,6 +1586,12 @@ if __name__ == "__main__":
         default=False,
         action="store_true",
     )
+    parser.add_argument(
+        "--overwrite_json",
+        help="Ignore stored JSON files and overwrite them. (Default: False)",
+        default=False,
+        action="store_true",
+    )
 
     args = parser.parse_args()
 
@@ -1603,26 +1601,9 @@ if __name__ == "__main__":
     analyze_image(
         args.file,
         visualize=args.visualize,
-        refresh=args.refresh,
         channels=args.channels,
         metadata=args.metadata,
         fish_range=args.fish_range,
         no_cyto=args.no_cyto,
+        overwrite_json=args.overwrite_json,
     )
-
-    # files = [
-    #     g
-    #     for p in [
-    #         "/Users/avaccari/Library/CloudStorage/GoogleDrive-avaccari@middlebury.edu/Shared drives/MarkD/FISH analysis/2023-01 LPLC2 FISH calibration/*.czi"
-    #     ]
-    #     for g in glob(p)
-    # ]
-    # files.sort()
-    # for f in files:
-    #     try:
-    #         analyze_image(
-    #             f,
-    #             visualize=False,
-    #         )
-    #     except:
-    #         pass
