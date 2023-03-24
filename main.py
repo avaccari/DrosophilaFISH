@@ -315,27 +315,56 @@ def _get_fish_puncta(
     thresh_max=251,
     thresh_step=5,
 ):
+    MIN_SIGMA = 1.5
+    MAX_SIGMA = 3
+    NUM_SIGMA = 7
+
     fish_puncta_df = pd.DataFrame()
     props_df = pd.DataFrame()
-    for threshold in range(thresh_min, thresh_max, thresh_step):
+    for threshold in np.arange(thresh_min, thresh_max, thresh_step):
         detections_at_thrs = {}
         for n_idx, n_row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
             lbl = n_row["label"]
             print(
-                f"--- Ch: {ch_id} - Thrs: {threshold} - {n_idx + 1:2} / {len(nuclei_props_df):2} (lbl: {lbl:2}) ---"
+                f"--- Ch: {ch_id} - Thrs: {thresh_min} => {threshold} => {thresh_max} - {n_idx + 1:3}/{len(nuclei_props_df):3} (lbl: {lbl:3}) ---"
             )
             sl = n_row["slice"]
+
+            # Add a little buffer around based on MAX_SIGMA
+            slice_0 = slice(
+                sl[0].start - 4 * MAX_SIGMA if sl[0].start >= 4 * MAX_SIGMA else 0,
+                sl[0].stop + 4 * MAX_SIGMA
+                if sl[0].stop <= fish_channel.shape[0] - 4 * MAX_SIGMA
+                else fish_channel.shape[0],
+                None,
+            )
+            slice_1 = slice(
+                sl[1].start - 4 * MAX_SIGMA if sl[1].start >= 4 * MAX_SIGMA else 0,
+                sl[1].stop + 4 * MAX_SIGMA
+                if sl[1].stop <= fish_channel.shape[1] - 4 * MAX_SIGMA
+                else fish_channel.shape[1],
+                None,
+            )
+            slice_2 = slice(
+                sl[2].start - 4 * MAX_SIGMA if sl[2].start >= 4 * MAX_SIGMA else 0,
+                sl[2].stop + 4 * MAX_SIGMA
+                if sl[2].stop <= fish_channel.shape[2] - 4 * MAX_SIGMA
+                else fish_channel.shape[2],
+                None,
+            )
+            sl_buf = [slice_0, slice_1, slice_2]
 
             # Find 647 blobs locations within the bbox, mask, and shift coordinates
             # TODO: consider using a range of sigmas and then Frangi to preserve the most blobby
             ctrs = detect_blobs(
-                fish_channel[sl[0], sl[1], sl[2]].astype("float"),
-                min_sigma=2,
-                max_sigma=2,
-                num_sigma=1,
-                z_y_x_ratio=(1 / spacing_ratio, 1, 1),
+                fish_channel[sl_buf[0], sl_buf[1], sl_buf[2]].astype("float64"),
+                min_sigma=MIN_SIGMA,
+                max_sigma=MAX_SIGMA,
+                num_sigma=NUM_SIGMA,
+                z_y_x_ratio=(1, 1, 1),
+                # z_y_x_ratio=(1 / spacing_ratio, 1, 1),
                 threshold=threshold,
-            ) + (sl[0].start, sl[1].start, sl[2].start, 0, 0, 0)
+            ) + (sl_buf[0].start, sl_buf[1].start, sl_buf[2].start, 0, 0, 0)
 
             df = pd.DataFrame(
                 ctrs, columns=["Z", "Y", "X", "sigma_Z", "sigma_Y", "sigma_X"]
@@ -361,7 +390,8 @@ def _get_fish_puncta(
                 detections_at_thrs[lbl] = df
 
             print(
-                f"Detected {Fore.BLUE}{len(df)} puncta{Style.RESET_ALL} ({len(df) / n_row['area']:.4f} puncta/pixel)"
+                f"Detected {Fore.BLUE}{len(df)} puncta{Style.RESET_ALL} ({len(df) / n_row['area']:.4f} puncta/pixel)\033[F\033[A",
+                end="",
             )
 
         # Assumption: if there are no detections at a given threshold, there
@@ -416,6 +446,7 @@ def _get_fish_puncta(
         props_df = (
             df.copy() if props_df.empty else props_df.merge(df, on="label", how="left")
         )
+    print("\033[B\033[B\033[E")  # Move cursor down three lines
     # Fill missing counts with zeros and missing ids with empty lists
     filt = props_df.filter(regex="cnt")
     props_df[filt.columns] = filt.fillna(0)
@@ -565,15 +596,21 @@ def analyze_image(
     else:
         raise ValueError(f"Number of channels ({channels}) not allowed.")
 
+    # Specify threshold for nuclei detection
+    # TODO: maybe this could be linked to some features of the channel:
+    # TODO: SNR, contrast, luminosity, etc.
+    NUCLEI_THRESHOLD = 10
+
     # Specify thresholds for FISH detection
-    FISH_THRESHOLD_MIN = 5
-    FISH_THRESHOLD_MAX = 251
-    FISH_THRESHOLD_STEP = 5
+    FISH_THRESHOLD_MIN = 2
+    FISH_THRESHOLD_MAX = 10.5
+    FISH_THRESHOLD_STEP = 0.5
 
     # Gather and report image information
     pixel_sizes = image.scaling
     spacing = pixel_sizes
-    spacing_ratio = int(np.ceil(spacing[0] / spacing[1]))
+    # spacing_ratio = int(np.ceil(spacing[0] / spacing[1]))
+    spacing_ratio = spacing[0] / spacing[1]
     contrast = [[np.min(data[ch]), np.max(data[ch])] for ch in range(data.shape[0])]
     print(
         f"{Style.BRIGHT}{Fore.BLUE}########## Original data info: ##########{Style.RESET_ALL}"
@@ -772,12 +809,12 @@ def analyze_image(
     # Detect the centers of the nuclei
     print("Detecting nuclei's centers:")
     nuclei_ctrs = detect_blobs(
-        nuclei_den,
-        min_sigma=25,
+        nuclei_den.astype("float32"),
+        min_sigma=15,
         max_sigma=25,
-        num_sigma=1,
+        num_sigma=3,
         z_y_x_ratio=(1 / spacing_ratio, 1, 1),
-        threshold=5,
+        threshold=NUCLEI_THRESHOLD,
         filename_root=filename,
         ch_id=ch_dict[NUCLEI_CH],
     )
@@ -792,12 +829,12 @@ def analyze_image(
     print(
         f"Detected {Style.BRIGHT}{len(nuclei_ctrs)}{Style.RESET_ALL} centers:\n{nuclei_ctrs}"
     )
-
+    # TODO: Add the sigmas in the properties of the visualization
     if visualize:
-        viewer.add_points(
+        nuclei_ctrs_viz = viewer.add_points(
             nuclei_ctrs[:, :3],
             name=ch_dict[NUCLEI_CH] + "-ctrs",
-            size=5,
+            size=nuclei_ctrs[:, 3:],
             symbol="disc",
             opacity=1,
             scale=spacing,
@@ -807,6 +844,7 @@ def analyze_image(
             out_of_slice_display=True,
             visible=False,
         )
+        nuclei_ctrs_viz.features["sigma"] = list(nuclei_ctrs[:, 3:])
 
     # Find the Voronoi regions in the nuclei's mask using detected nuclei's
     # centers as markers
@@ -1009,13 +1047,14 @@ def analyze_image(
         ch_id=ch_dict[NUCLEI_CH],
     )
     if visualize:
-        viewer.add_labels(
+        nuclei_viz = viewer.add_labels(
             nuclei_labels,
             name=ch_dict[NUCLEI_CH] + "-lbls-with-cyto-dilate",
             scale=spacing,
             blending="additive",
-            visible=False,
+            visible=True,
         )
+        nuclei_viz.contour = 2
     nuclei_labels_mask = nuclei_labels > 0
     ################################################################################
 
@@ -1122,67 +1161,21 @@ def analyze_image(
             viewer.add_image(
                 fish_647_to_analyze,
                 name=ch_dict[FISH_647_CH] + "-analyzed-stretched-defloored",
-                colormap="magenta",
+                colormap="bop blue",
                 blending="additive",
                 scale=spacing,
                 interpolation="nearest",
-                visible=False,
+                visible=True,
             )
         viewer.add_image(
             fish_568_to_analyze,
             name=ch_dict[FISH_568_CH] + "-analyzed-stretched-defloored",
-            colormap="magenta",
+            colormap="bop orange",
             blending="additive",
             scale=spacing,
             interpolation="nearest",
-            visible=False,
+            visible=True,
         )
-
-    # # Apply median filter to denoise the FISH channels
-    # #! This works with our data only
-    # if channels == 4:
-    #     fish_647_to_analyze = filter(
-    #         fish_647_to_analyze,
-    #         # footprint=ski_mor.ball(1),
-    #         # footprint=ski_mor.ball(2)[1:4],
-    #         # footprint=ski_mor.ball(3)[1::2],
-    #         # footprint=ski_mor.ball(5)[2::3],
-    #         footprint=ski_mor.ball(7)[3::4],
-    #         filename_root=filename,
-    #         ch_id=ch_dict[FISH_647_CH],
-    #     )
-    # fish_568_to_analyze = filter(
-    #     fish_568_to_analyze,
-    #     # footprint=ski_mor.ball(1),
-    #     # footprint=ski_mor.ball(2)[1:4],
-    #     # footprint=ski_mor.ball(3)[1::2],
-    #     # footprint=ski_mor.ball(5)[2::3],
-    #     footprint=ski_mor.ball(7)[3::4],
-    #     filename_root=filename,
-    #     ch_id=ch_dict[FISH_568_CH],
-    # )
-
-    # if visualize:
-    # #! This works with our data only
-    #     if channels == 4:
-    #         viewer.add_image(
-    #             fish_647_to_analyze,
-    #             name=ch_dict[FISH_647_CH] + "-analyzed-stretched-defloored-median",
-    #             colormap="magenta",
-    #             blending="additive",
-    #             scale=spacing,
-    #             interpolation="nearest",
-    #             visible=False,
-    #         )
-    #     viewer.add_image(
-    #         fish_568_to_analyze,
-    #         name=ch_dict[FISH_568_CH] + "-analyzed-stretched-defloored-median",
-    #         colormap="magenta",
-    #         blending="additive",
-    #         scale=spacing,
-    #         interpolation="nearest",
-    #         visible=False,
-    #     )
 
     # Find FISH signatures within channels
     #! This works with our data only
@@ -1232,6 +1225,8 @@ def analyze_image(
     nuclei_props_df.to_json(path + ".json")
     nuclei_props_df.to_csv(path + ".csv")
 
+    print(f"\n{Fore.RED}{Style.BRIGHT}--- Analysis finished ---{Style.RESET_ALL}\n\n")
+
     if visualize:
         # Visualize puncta
         #! This works with our data only
@@ -1239,7 +1234,8 @@ def analyze_image(
             pts_647 = viewer.add_points(
                 fish_647_puncta_df[["Z", "Y", "X"]].to_numpy(),
                 name=ch_dict[FISH_647_CH] + "-puncta",
-                size=15,
+                size=10
+                * fish_647_puncta_df[["sigma_Z", "sigma_Y", "sigma_X"]].to_numpy(),
                 symbol="ring",
                 opacity=1,
                 scale=spacing,
@@ -1247,16 +1243,19 @@ def analyze_image(
                 face_color="blue",
                 blending="additive",
                 out_of_slice_display=False,
-                visible=False,
+                visible=True,
             )
             pts_647.features["label"] = fish_647_puncta_df["label"]
+            pts_647.features["sigmas"] = list(
+                fish_647_puncta_df[["sigma_Z", "sigma_Y", "sigma_X"]].to_numpy()
+            )
             pts_647.features["nucleus"] = fish_647_puncta_df["nucleus"]
             pts_647.features["thresholds"] = fish_647_puncta_df["thresholds"]
 
         pts_568 = viewer.add_points(
             fish_568_puncta_df[["Z", "Y", "X"]].to_numpy(),
             name=ch_dict[FISH_568_CH] + "-puncta",
-            size=15,
+            size=10 * fish_568_puncta_df[["sigma_Z", "sigma_Y", "sigma_X"]].to_numpy(),
             symbol="ring",
             opacity=1,
             scale=spacing,
@@ -1264,9 +1263,12 @@ def analyze_image(
             face_color="red",
             blending="additive",
             out_of_slice_display=False,
-            visible=False,
+            visible=True,
         )
         pts_568.features["label"] = fish_568_puncta_df["label"]
+        pts_568.features["sigmas"] = list(
+            fish_568_puncta_df[["sigma_Z", "sigma_Y", "sigma_X"]].to_numpy()
+        )
         pts_568.features["nucleus"] = fish_568_puncta_df["nucleus"]
         pts_568.features["thresholds"] = fish_568_puncta_df["thresholds"]
 
@@ -1285,15 +1287,15 @@ def analyze_image(
         @magicgui(
             auto_call=True,
             threshold={
-                "widget_type": "Slider",
+                "widget_type": "FloatSlider",
                 "min": FISH_THRESHOLD_MIN,
                 "max": FISH_THRESHOLD_MAX,
                 "step": FISH_THRESHOLD_STEP,
             },
         )
-        def threshold_puncta(layer: napari.layers.Points, threshold: int) -> None:
+        def threshold_puncta(layer: napari.layers.Points, threshold: float) -> None:
             if "thresholds" in layer.features:
-                threshold = 5 * (threshold // 5)
+                threshold = FISH_THRESHOLD_STEP * (threshold // FISH_THRESHOLD_STEP)
                 selected_thresholds[layer.name] = threshold
                 layer.shown = [threshold in f for f in layer.features["thresholds"]]
 
@@ -1376,22 +1378,6 @@ def analyze_image(
         napari.run()
 
 
-##############################################################################################
-# # Bounding surfaces for thresholded nuclei
-# print("Evaluating thresholded nuclei's boundaries...", end="", flush=True)
-# nuclei_mask_boundaries = ski_mor.dilation(
-#     nuclei_mask, footprint=ski_mor.ball(1)) ^ nuclei_mask
-# viewer.add_image(
-#     nuclei_mask_boundaries,
-#     opacity=0.5,
-#     scale=spacing,
-#     colormap="red",
-#     blending="additive",
-#     interpolation="nearest",
-#     visible=False
-# )
-# print("done!")
-
 # # TODO: ideas to try to detect center of nuclei:
 # #       - Blur segmented, find max, watershed with Vornoi boundaries:
 # #         https://github.com/clEsperanto/pyclesperanto_prototype/blob/master/demo/segmentation/Segmentation_3D.ipynb
@@ -1422,113 +1408,6 @@ def analyze_image(
 # #     )
 # #     nuclei_props_df = nuclei_props_df.merge(comp_props_df, on='label')
 # #     nuclei_props_df = nuclei_props_df.rename(columns={'intensity_mean': 'intensity_mean_ch{}'.format(channels[ch])})
-
-# # Evaluate nuclei's volume statistics and use to select individual nuclei
-# # NOTE: This only really works, when it works, with the large median filter in x and y.
-# nuclei_min_vol, nuclei_med_vol, nuclei_max_vol = nuclei_props_df['area'].quantile([
-#     0.25, 0.5, 0.75])
-# nuclei_mean = nuclei_props_df['area'].mean()
-# nuclei_std = nuclei_props_df['area'].std()
-# print(" - Volumes quantiles: {}, {}, {}".format(
-#     nuclei_min_vol,
-#     nuclei_med_vol,
-#     nuclei_max_vol
-# )
-# )
-# print(" - Selected volume range: {} - {}".format(
-#     nuclei_min_vol,
-#     nuclei_max_vol)
-# )
-
-# # Show statistics
-# sbn.displot(
-#     nuclei_props_df,
-#     x='area',
-#     kde=True,
-#     rug=True
-# )
-# plt.axvline(nuclei_med_vol, color="red")
-# plt.axvline(nuclei_min_vol, color="red")
-# plt.axvline(nuclei_max_vol, color="red")
-# plt.axvline(nuclei_mean, color="green")
-# plt.axvline(nuclei_mean + nuclei_std, color="green")
-# plt.axvline(nuclei_mean - nuclei_std, color="green")
-
-# plt.figure()
-# sbn.boxplot(
-#     nuclei_props_df,
-#     x='area',
-#     notch=True,
-#     showcaps=False
-# )
-
-# # Remove large and small components based on percentiles
-# print(" - Removing unwanted nuclei connected components...", end="", flush=True)
-# nuclei_props_df.loc[:, 'keep'] = False
-# qry = 'area > ' + str(nuclei_min_vol) + ' & area < ' + str(nuclei_max_vol)
-# mask = nuclei_props_df.query(qry).index
-# nuclei_props_df.loc[mask, 'keep'] = True
-
-# # Generate the cleaned nuclei bool mask and the labeled components
-# nuclei_mask_cleaned = nuclei_mask.copy()
-# for _, row in nuclei_props_df[nuclei_props_df['keep'] == False].iterrows():
-#     nuclei_mask_cleaned[nuclei_comp == row['label']] = False
-
-# viewer.add_image(
-#     nuclei_mask_cleaned,
-#     scale=spacing,
-#     opacity=0.5,
-#     colormap="blue",
-#     blending="additive",
-#     interpolation="nearest",
-#     visible=False
-# )
-# print("done!")
-
-# print("Nuclei's dataframe:\n", nuclei_props_df)
-
-# # Bounding surfaces for uniquely detected nuclei
-# print("Evaluating uniquely detected nuclei's boundaries...", end="", flush=True)
-# nuclei_mask_cleaned_boundaries = ski_mor.dilation(
-#     nuclei_mask_cleaned, footprint=ski_mor.ball(1)) ^ nuclei_mask_cleaned
-# viewer.add_image(
-#     nuclei_mask_cleaned_boundaries,
-#     opacity=0.5,
-#     scale=spacing,
-#     colormap="red",
-#     blending="additive",
-#     interpolation="nearest",
-#     visible=False
-# )
-# print("done!")
-
-# # Mask original nuclei channel
-# print("Masking nuclei channel...", end="", flush=True)
-# nuclei_masked = data[NUCLEI_CH].copy()
-# nuclei_masked[nuclei_mask_cleaned == False] = 0
-# viewer.add_image(
-#     nuclei_masked,
-#     scale=spacing,
-#     opacity=1,
-#     colormap="green",
-#     blending="additive",
-#     interpolation="nearest",
-#     visible=False
-# )
-# print("done!")
-
-# # Mask original labels
-# print("Masking nuclei connected components...", end="", flush=True)
-# # nuclei_labels = ski_mea.label(nuclei_mask_cleaned)
-# nuclei_labels = nuclei_comp.copy()
-# nuclei_labels[nuclei_mask_cleaned == False] = 0
-# viewer.add_labels(
-#     nuclei_labels,
-#     scale=spacing,
-#     blending="additive",
-#     visible=False
-# )
-# print("done!")
 
 # # TODO: Software to check:
 # #        - CellProfiler (https://cellprofiler.org/)
