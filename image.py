@@ -2,7 +2,8 @@ import logging
 import sys
 import numpy as np
 from czi import Czi
-from channel import Channel
+
+# from channel import Channel
 
 
 class Image:
