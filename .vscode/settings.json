@@ -1,0 +1,29 @@
+{
+  "cSpell.words": [
+    "astype",
+    "dataframe",
+    "dtype",
+    "Frangi",
+    "ICIP",
+    "magicgui",
+    "matplotlib",
+    "napari",
+    "ndimage",
+    "ndisplay",
+    "otsu",
+    "Ponikiewski",
+    "puncta",
+    "pyplot",
+    "scipy",
+    "seaborn",
+    "skimage",
+    "Thresholding",
+    "Vornoi",
+    "Voronoi",
+    "voxel"
+  ],
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter"
+  },
+  "python.formatting.provider": "none"
+}

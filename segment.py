@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 
+# import matplotlib.pyplot as plt
 import numpy as np
 import skimage.measure as ski_mea
 import skimage.morphology as ski_mor
+from colorama import Fore, Style
 
 import os_utils
-
-import matplotlib.pyplot as plt
 
 
 class Segmentation(ABC):
@@ -28,7 +28,7 @@ class Segmentation(ABC):
         return intensities_stdev.sum()
 
     def _find_min_threshold(self, start, temp_region, temp_values):
-        costs = []  # Debug
+        # costs = []  #! Debug
         min_cost = np.inf
         threshold_min = 0
         for threshold in range(start, 256):
@@ -42,12 +42,12 @@ class Segmentation(ABC):
                 min_cost = cost
                 threshold_min = threshold
             print(
-                f"Threshold: {threshold:3d} => Cost: {cost:12.2f} (Optimal: {threshold_min:3d} => {min_cost:12.2f})\r",
+                f"\rThreshold: {threshold:3d} => Cost: {cost:12.2f} (Optimal: {threshold_min:3d} => {min_cost:12.2f})",
                 end="",
                 flush=True,
             )
-            costs.append(cost)
-        plt.scatter(range(start, start + len(costs)), costs, s=1)  # Debug
+            # costs.append(cost)  #! Debug
+        # plt.scatter(range(start, start + len(costs)), costs, s=1)  #! Debug
         return threshold_min
 
     def _temp_masks(self, values, current_region):
@@ -119,15 +119,15 @@ class Segmentation(ABC):
             centers_in_region[:, 0], centers_in_region[:, 1], centers_in_region[:, 2]
         ]
         if check.any() == False:  # No center inside the region of interest
-            return False
+            return False, "center out of region"
         if check.sum() > 1:  # More than one center inside the region of interest
-            return False
+            return False, "multiple centers in region"
         if self._touch_edges(temp_mask_open):  # Region touches the border of the volume
-            return False
-        return True
+            return False, "region touches border"
+        return True, "good"
 
     def _segment(self, regions, values, centers):
-        plt.figure()  # Debug
+        # plt.figure()  #! Debug
         labels = np.zeros_like(regions)
         start = 1
         for lbl in range(start, regions.max() + start):
@@ -154,27 +154,32 @@ class Segmentation(ABC):
             temp_mask_open = ski_mor.opening(temp_mask, footprint=ski_mor.ball(5)[2::3])
             #!
             # Verify that the mask can be added to the labels
-            if self._mask_ok(
+            result, reason = self._mask_ok(
                 temp_mask_open, centers, z_min, z_max, y_min, y_max, x_min, x_max
-            ):
+            )
+            if result:
                 labels[
                     z_min:z_max, y_min:y_max, x_min:x_max
                 ] += lbl * temp_mask_open.astype("uint16")
-
-            print("")
-        plt.show()  # Debug
+                print(f"{Fore.GREEN} ✓ ({reason}){Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED} ✕ ({reason}){Style.RESET_ALL}")
+        # plt.show()  #! Debug
         return labels
 
     def segment(self, labels, values, centers):
+        # plt.ion()  #! Debug
         print(f"Segmenting {self.ch_id}")
         labels = os_utils.store_output(
             self._segment,
             filename_root=self.filename_root,
             ch_id=self.ch_id,
             suffix="labels",
-            regions=labels,
-            values=values,
-            centers=centers,
+            args={
+                "regions": labels,
+                "values": values,
+                "centers": centers,
+            },
         )
         print("done!")
         return labels

@@ -32,9 +32,11 @@ def evaluate_voronoi(mask, markers, spacing=(1, 1, 1), filename_root=None, ch_id
         filename_root=filename_root,
         ch_id=ch_id,
         suffix="voronoi",
-        mask=mask,
-        markers=markers,
-        spacing=spacing,
+        args={
+            "mask": mask,
+            "markers": markers,
+            "spacing": spacing,
+        },
     )
 
     print("done!")

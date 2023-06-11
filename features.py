@@ -25,13 +25,15 @@ def detect_blobs(
         filename_root=filename_root,
         ch_id=ch_id,
         suffix=f"blb-{tuple(np.round(min_sigma, decimals=2))}-{tuple(np.round(max_sigma, decimals=2))}",
-        data=data,
-        min_sigma=min_sigma,
-        max_sigma=max_sigma,
-        num_sigma=num_sigma,
-        threshold=threshold,
-        overlap=overlap,
-        exclude_border=True,
+        args={
+            "image": data,
+            "min_sigma": min_sigma,
+            "max_sigma": max_sigma,
+            "num_sigma": num_sigma,
+            "threshold": threshold,
+            "overlap": overlap,
+            "exclude_border": True,
+        },
     )
 
     print("done!")

@@ -47,15 +47,19 @@ def filter(
     if type == "closing":
         fun = ski_mor.closing
         suffix = f"clos-{footprint_dim}"
+        args = {"image": data, "footprint": footprint}
     elif type == "gaussian":
         fun = sci_ndi.gaussian_filter
         suffix = f"den-gaus-{tuple(np.round(sigma, decimals=2))}"
+        args = {"input": data, "sigma": sigma, "mode": mode, "cval": cval}
     elif type == "maximum":
         fun = ski_fil_ran.maximum
         suffix = f"max-{footprint_dim}"
+        args = {"image": data, "footprint": footprint}
     elif type == "median":
         fun = sci_ndi.median_filter
         suffix = f"den-med-{footprint_dim}"
+        args = {"input": data, "footprint": footprint, "mode": mode, "cval": cval}
     else:
         raise ValueError("WARNING: the specified filtering mode is not available.")
 
@@ -70,11 +74,7 @@ def filter(
         filename_root=filename_root,
         ch_id=ch_id,
         suffix=suffix,
-        data=data,
-        footprint=footprint,
-        sigma=sigma,
-        mode=mode,
-        cval=cval,
+        args=args,
     )
 
     print("done!")

@@ -27,11 +27,11 @@ def load(file):
         return np.load(f)
 
 
-def store_output(
-    function, filename_root=None, ch_id=None, suffix="", *fun_args, **fun_kwargs
-):
+def store_output(function, filename_root=None, ch_id=None, suffix="", args=None):
+    if args is None:
+        args = {}
     if filename_root is None:
-        output = function(*fun_args, **fun_kwargs)
+        output = function(**args)
     elif ch_id is None:
         raise ValueError(
             "A ch_id should be provided to identify the channel. Segmentation was not evaluated."
@@ -41,7 +41,7 @@ def store_output(
         try:
             output = load(file)
         except (FileNotFoundError, ValueError):
-            output = function(*fun_args, **fun_kwargs)
+            output = function(**args)
             try:
                 root_dir = build_path(filename_root)
                 if not os.path.isdir(root_dir):
