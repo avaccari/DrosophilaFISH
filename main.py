@@ -309,6 +309,7 @@ def analyze_image(
     #     )
     # nuclei_ctrs_df['ID'] = range(1, 1 + len(nuclei_ctrs))
 
+    np.set_printoptions(precision=2)
     print(
         f"Detected {Style.BRIGHT}{len(nuclei_ctrs)}{Style.RESET_ALL} centers:\n{nuclei_ctrs}"
     )

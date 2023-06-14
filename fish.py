@@ -101,7 +101,7 @@ def _get_fish_puncta(
                 detections_at_thrs[lbl] = df
 
             print(
-                f"Detected {Fore.BLUE}{len(df):3d} puncta{Style.RESET_ALL} ({len(df) / n_row['area']:.4f} puncta/pixel)\033[F\033[A",
+                f"Detected {Fore.BLUE}{len(df):3d} puncta{Style.RESET_ALL} ({len(df) / n_row['area']:.4f} puncta/pixel)\033[2F",
                 end="",
             )
 
@@ -156,7 +156,7 @@ def _get_fish_puncta(
         props_df = (
             df.copy() if props_df.empty else props_df.merge(df, on="label", how="left")
         )
-    print("\033[B\033[B\033[E")  # Move cursor down three lines
+    print("\033[3E")  # Move cursor down three lines
     # Fill missing counts with zeros and missing ids with empty lists
     filt = props_df.filter(regex="cnt")
     props_df[filt.columns] = filt.fillna(0)
