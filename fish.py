@@ -101,7 +101,7 @@ def _get_fish_puncta(
                 detections_at_thrs[lbl] = df
 
             print(
-                f"Detected {Fore.BLUE}{len(df):3d} puncta{Style.RESET_ALL} ({len(df) / n_row['area']:.4f} puncta/pixel)\033[2F",
+                f"Detected {Fore.BLUE}{len(df):3d} puncta{Style.RESET_ALL} ({len(df) / n_row['area']:.4f} puncta/pixel)\033[3F",
                 end="",
             )
 
