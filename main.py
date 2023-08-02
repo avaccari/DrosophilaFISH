@@ -1,4 +1,5 @@
 import argparse
+import sys
 import os.path as osp
 from tkinter import filedialog
 
@@ -712,7 +713,8 @@ if __name__ == "__main__":
         action="store_true",
     )
 
-    args = parser.parse_args()
+    # If no arguments, invoke with '--help'
+    args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
     if args.visualize:
         import napari
