@@ -31,6 +31,7 @@ def analyze_image(
     metadata=False,
     raw_fish_range=None,
     no_cyto=False,
+    nuclei_ch1=False,
     overwrite_json=False,
 ):
     # Ask user to choose a file
@@ -66,16 +67,31 @@ def analyze_image(
             raise ValueError(
                 f"Configuration of channels ({channels}) and no_cyto ({no_cyto}) not supported."
             )
-        ch_dict["Nuclei"] = 0
-        ch_dict["Cytoplasm"] = 3
-        ch_dict["others"] = [0, 3]
-        ch_dict["fish"] = [1, 2]
-        ch_dict[0] = "Nuclei"
-        ch_dict[1] = "FISH_647"
-        ch_dict[2] = "FISH_568"
-        ch_dict[3] = "Cytoplasm"
-        ch_dict["colormaps"] = ["green", "bop blue", "bop orange", "gray"]
+        if nuclei_ch1:
+            ch_dict["Nuclei"] = 1
+            ch_dict["Cytoplasm"] = 3
+            ch_dict["others"] = [1, 3]
+            ch_dict["fish"] = [0, 2]
+            ch_dict[0] = "FISH_647"
+            ch_dict[1] = "Nuclei"
+            ch_dict[2] = "FISH_568"
+            ch_dict[3] = "Cytoplasm"
+            ch_dict["colormaps"] = ["bop blue", "green", "bop orange", "gray"]
+        else:
+            ch_dict["Nuclei"] = 0
+            ch_dict["Cytoplasm"] = 3
+            ch_dict["others"] = [0, 3]
+            ch_dict["fish"] = [1, 2]
+            ch_dict[0] = "Nuclei"
+            ch_dict[1] = "FISH_647"
+            ch_dict[2] = "FISH_568"
+            ch_dict[3] = "Cytoplasm"
+            ch_dict["colormaps"] = ["green", "bop blue", "bop orange", "gray"]
     elif channels == 3:
+        if nuclei_ch1:
+            raise ValueError(
+                f"Configuration of channels ({channels}) and nuclei_ch1 ({nuclei_ch1}) not supported."
+            )
         if no_cyto:
             ch_dict["Nuclei"] = 0
             ch_dict["others"] = [0]
@@ -707,6 +723,12 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
+        "--nuclei_ch1",
+        help="Specifies that the nuclei are in channel 1. (Default: False)",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
         "--overwrite_json",
         help="Ignore stored JSON files and overwrite them. (Default: False)",
         default=False,
@@ -714,7 +736,7 @@ if __name__ == "__main__":
     )
 
     # If no arguments, invoke with '--help'
-    args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
+    args = parser.parse_args(args=None if sys.argv[1:] else ["--help"])
 
     if args.visualize:
         import napari
@@ -729,5 +751,6 @@ if __name__ == "__main__":
         metadata=args.metadata,
         raw_fish_range=args.raw_fish_range,
         no_cyto=args.no_cyto,
+        nuclei_ch1=args.nuclei_ch1,
         overwrite_json=args.overwrite_json,
     )
