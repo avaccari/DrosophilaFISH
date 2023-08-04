@@ -346,6 +346,11 @@ def analyze_image(
         )
         nuclei_ctrs_viz.features["sigma"] = list(nuclei_ctrs[:, 3:])
 
+    # If no centers were detected, stop the analysis
+    if len(nuclei_ctrs) == 0:
+        print("No nuclei's centers were detected. Stopping analysis.")
+        return
+
     # Split the image volume in Voronoi cells based on the nuclei's center
     print("Identifying volumes associated with nuclei's centers:")
     nuclei_regions = evaluate_voronoi(
@@ -540,23 +545,23 @@ def analyze_image(
             filename_root=filename,
         )
 
-    ###########################################################
-    # Extract individual puncta
-    for ch in ch_dict["fish"]:
-        for _, row in fish_puncta_df[ch].iterrows():
-            coo = row[["Z", "Y", "X"]].astype("uint16")
-            sig = (
-                2 * np.sqrt(3) * row[["sigma_Z", "sigma_Y", "sigma_X"]].to_numpy() + 0.5
-            ).astype("uint16")
-            slc = [slice(c - s, c + s + 1) for c, s in zip(coo, sig)]
-            grd = np.mgrid[slc[0], slc[1], slc[2]]
-            dist = np.sqrt(
-                np.square(grd[0] - coo[0])
-                + np.square(grd[1] - coo[1])
-                + np.square(grd[2] - coo[2])
-            )
-            chunk = data[ch][slc[0], slc[1], slc[2]]
-    #########################################################
+    # ###########################################################
+    # # Extract individual puncta
+    # for ch in ch_dict["fish"]:
+    #     for _, row in fish_puncta_df[ch].iterrows():
+    #         coo = row[["Z", "Y", "X"]].astype("uint16")
+    #         sig = (
+    #             2 * np.sqrt(3) * row[["sigma_Z", "sigma_Y", "sigma_X"]].to_numpy() + 0.5
+    #         ).astype("uint16")
+    #         slc = [slice(c - s, c + s + 1) for c, s in zip(coo, sig)]
+    #         grd = np.mgrid[slc[0], slc[1], slc[2]]
+    #         dist = np.sqrt(
+    #             np.square(grd[0] - coo[0])
+    #             + np.square(grd[1] - coo[1])
+    #             + np.square(grd[2] - coo[2])
+    #         )
+    #         chunk = data[ch][slc[0], slc[1], slc[2]]
+    # #########################################################
 
     # Merge to nuclei props dataframe
     for ch in ch_dict["fish"]:
