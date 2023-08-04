@@ -565,7 +565,10 @@ def analyze_image(
 
     # Merge to nuclei props dataframe
     for ch in ch_dict["fish"]:
-        nuclei_props_df = nuclei_props_df.merge(props_df[ch], on="label", how="left")
+        if not props_df[ch].empty:
+            nuclei_props_df = nuclei_props_df.merge(
+                props_df[ch], on="label", how="left"
+            )
 
     # Fill missing counts with zeros and missing ids with empty lists
     filt = nuclei_props_df.filter(regex="cnt")
