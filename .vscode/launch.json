@@ -31,6 +31,15 @@
       "args": ["--visualize"]
     },
     {
+      "name": "Python: main.py (--channels 3)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--channels=3"]
+    },
+    {
       "name": "Python: main.py (--visualize --channels 3)",
       "type": "python",
       "request": "launch",
