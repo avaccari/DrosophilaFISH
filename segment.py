@@ -10,9 +10,10 @@ import os_utils
 
 
 class Segmentation(ABC):
-    def __init__(self, filename_root, ch_id):
+    def __init__(self, filename_root, ch_id, overwrite=False):
         self.filename_root = filename_root
         self.ch_id = ch_id
+        self.overwrite = overwrite
 
     @abstractmethod
     def _cost(self, threshold, temp_region, temp_values):
@@ -167,27 +168,36 @@ class Segmentation(ABC):
         # plt.show()  #! Debug
         return labels
 
-    def segment(self, labels, values, centers):
+    def segment(self, labels, values, centers, write_to_tiff=False):
         # plt.ion()  #! Debug
         print(f"Segmenting {self.ch_id}")
-        labels = os_utils.store_output(
+        labels = os_utils.store_to_npy(
             self._segment,
             filename_root=self.filename_root,
             ch_id=self.ch_id,
             suffix="labels",
-            args={
+            func_args={
                 "regions": labels,
                 "values": values,
                 "centers": centers,
             },
+            overwrite=self.overwrite,
         )
+        # If we are writing to tiff
+        if write_to_tiff:
+            os_utils.write_to_tif(
+                labels,
+                filename_root=self.filename_root,
+                ch_id=self.ch_id,
+                suffix="labels",
+            )
         print("done!")
         return labels
 
 
 class NucleiSegmentation(Segmentation):
-    def __init__(self, filename_root, ch_id):
-        super().__init__(filename_root, ch_id)
+    def __init__(self, filename_root, ch_id, overwrite=False):
+        super().__init__(filename_root, ch_id, overwrite=overwrite)
 
     def _cost(self, t, temp_region, temp_values):
         msk = np.zeros_like(temp_region, dtype="bool")

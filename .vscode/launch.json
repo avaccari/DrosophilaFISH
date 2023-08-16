@@ -22,6 +22,24 @@
       "args": ["--visualize"]
     },
     {
+      "name": "Python: main.py (--overwrite_lzma)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--overwrite_lzma"]
+    },
+    {
+      "name": "Python: main.py (--overwrite_json)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--overwrite_json"]
+    },
+    {
       "name": "Python: DBG_ALL main.py (--visualize)",
       "type": "python",
       "request": "launch",
@@ -29,6 +47,24 @@
       "console": "integratedTerminal",
       "justMyCode": false,
       "args": ["--visualize"]
+    },
+    {
+      "name": "Python: main.py (--nuclei_ch1)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--nuclei_ch1"]
+    },
+    {
+      "name": "Python: main.py (--visualize --nuclei_ch1)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--visualize", "--nuclei_ch1"]
     },
     {
       "name": "Python: main.py (--channels 3)",

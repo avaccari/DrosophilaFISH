@@ -176,6 +176,7 @@ def get_fish_puncta(
     thresh_step=5,
     filename_root=None,
     ch_id=None,
+    overwrite=False,
 ):
     if ch_id is None:
         raise ValueError(
@@ -202,10 +203,14 @@ def get_fish_puncta(
             filename_root,
             f"-{ch_id}-puncta-props-df-({thresh_min}-{thresh_max}-{thresh_step})",
         )
-        try:
+        if (
+            os.path.exists(file_puncta + ".json")
+            and os.path.exists(file_props + ".json")
+            and not overwrite
+        ):
             fish_puncta_df = pd.read_json(file_puncta + ".json")
             props_df = pd.read_json(file_props + ".json")
-        except FileNotFoundError:
+        else:
             print(f"Looking for FISH signatures in channel {ch_id}:")
             fish_puncta_df, props_df = _get_fish_puncta(
                 fish_channel,

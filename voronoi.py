@@ -17,7 +17,9 @@ def _evaluate_voronoi(mask, markers, spacing=(1, 1, 1)):
     return labels
 
 
-def evaluate_voronoi(mask, markers, spacing=(1, 1, 1), filename_root=None, ch_id=None):
+def evaluate_voronoi(
+    mask, markers, spacing=(1, 1, 1), filename_root=None, ch_id=None, overwrite=False
+):
     # Find the equivalent to Voronoi regions in the provided mask based on the
     # provided markers
     # Coordinates are normalized to the physical size using 'spacing'
@@ -27,16 +29,17 @@ def evaluate_voronoi(mask, markers, spacing=(1, 1, 1), filename_root=None, ch_id
         flush=True,
     )
 
-    labels = os_utils.store_output(
+    labels = os_utils.store_to_npy(
         _evaluate_voronoi,
         filename_root=filename_root,
         ch_id=ch_id,
         suffix="voronoi",
-        args={
+        func_args={
             "mask": mask,
             "markers": markers,
             "spacing": spacing,
         },
+        overwrite=overwrite,
     )
 
     print("done!")

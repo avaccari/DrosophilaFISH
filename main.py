@@ -1,6 +1,6 @@
 import argparse
-import sys
 import os.path as osp
+import sys
 from tkinter import filedialog
 
 import matplotlib.pyplot as plt
@@ -14,10 +14,9 @@ import os_utils
 from features import detect_blobs
 from fish import get_fish_puncta
 from image import Image
-from preprocess import contrast_stretch, eval_stats, remove_floor, filter
+from preprocess import contrast_stretch, eval_stats, filter, remove_floor
 from segment import NucleiSegmentation
 from voronoi import evaluate_voronoi
-
 
 #! IMPORTANT FOR CONSISTENCY: add a flag so that if there is an exception with a
 #! file, all the following steps are re-evaluated instead of using stored values
@@ -29,10 +28,13 @@ def analyze_image(
     visualize=False,
     channels=4,
     metadata=False,
-    raw_fish_range=None,
+    fish_contrast_range=None,
     no_cyto=False,
     nuclei_ch1=False,
     overwrite_json=False,
+    overwrite_lzma=False,
+    nuclei_sigma_range=(15, 25, 3),
+    nuclei_threshold=5,
 ):
     # Ask user to choose a file
     print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}")
@@ -112,14 +114,6 @@ def analyze_image(
     else:
         raise ValueError(f"Number of channels ({channels}) not allowed.")
 
-    # Specify threshold for nuclei detection
-    # TODO: maybe this could be linked to some features of the channel:
-    # TODO: SNR, contrast, luminosity, etc.
-    NUCLEI_THRESHOLD = 5
-    NUCLEI_SIGMA_MIN = 15
-    NUCLEI_SIGMA_MAX = 25
-    NUCLEI_SIGMA_STEP = 3
-
     # Specify thresholds for FISH detection
     FISH_THRESHOLD_MIN = 2
     FISH_THRESHOLD_MAX = 10.5
@@ -194,8 +188,8 @@ def analyze_image(
             data[ch],
             ch_id=ch_dict[ch],
             in_range=(min_intensity, max_intensity)
-            if raw_fish_range is None
-            else (raw_fish_range[0], raw_fish_range[1]),
+            if fish_contrast_range is None
+            else (fish_contrast_range[0], fish_contrast_range[1]),
         )
 
     # If needed, convert to uint8
@@ -221,6 +215,7 @@ def analyze_image(
             sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
             filename_root=filename,
             ch_id=ch_dict[ch],
+            overwrite=overwrite_lzma,
         )
 
     # Contrast stretch nuclei and cyto
@@ -259,6 +254,7 @@ def analyze_image(
         footprint=ski_mor.ball(7)[3::4],
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Nuclei"]],
+        overwrite=overwrite_lzma,
     )
     if visualize:
         viewer.add_image(
@@ -278,6 +274,7 @@ def analyze_image(
         footprint=ski_mor.ball(7)[3::4],
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Cytoplasm"]],
+        overwrite=overwrite_lzma,
     )
     if visualize:
         viewer.add_image(
@@ -307,16 +304,20 @@ def analyze_image(
     #       the image, it will change the required threshold.
 
     # Detect the centers of the nuclei
+    # TODO: maybe sigma range and threshold could be calculated from some
+    # TODO: features of the nuclei channel:
+    # TODO: SNR, contrast, luminosity, etc.
     print("Detecting nuclei's centers:")
     nuclei_ctrs = detect_blobs(
         nuclei_den.astype("float32"),
-        min_sigma=NUCLEI_SIGMA_MIN,
-        max_sigma=NUCLEI_SIGMA_MAX,
-        num_sigma=NUCLEI_SIGMA_STEP,
+        min_sigma=nuclei_sigma_range[0],
+        max_sigma=nuclei_sigma_range[1],
+        num_sigma=nuclei_sigma_range[2],
         z_y_x_ratio=(1 / spacing_ratio, 1, 1),
-        threshold=NUCLEI_THRESHOLD,
+        threshold=nuclei_threshold,
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Nuclei"]],
+        overwrite=overwrite_lzma,
     )
 
     # # Create dataframe with nuclei centers and assign IDs
@@ -359,6 +360,7 @@ def analyze_image(
         spacing=(spacing_ratio, 1, 1),
         filename_root=filename,
         ch_id="Volume",
+        overwrite=overwrite_lzma,
     )
     if visualize:
         nuclei_vor = viewer.add_labels(
@@ -372,16 +374,15 @@ def analyze_image(
 
     # Segment the nuclei
     nuclei = NucleiSegmentation(
-        filename_root=filename, ch_id=ch_dict[ch_dict["Nuclei"]]
-    )
-    nuclei_labels = nuclei.segment(
-        labels=nuclei_regions, values=nuclei_den, centers=nuclei_ctrs[:, :3]
-    )
-    os_utils.write_to_tif(
-        nuclei_labels,
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Nuclei"]],
-        suffix="labels",
+        overwrite=overwrite_lzma,
+    )
+    nuclei_labels = nuclei.segment(
+        labels=nuclei_regions,
+        values=nuclei_den,
+        centers=nuclei_ctrs[:, :3],
+        write_to_tiff=True,
     )
     if visualize:
         nuclei_viz = viewer.add_labels(
@@ -516,6 +517,7 @@ def analyze_image(
             filename_root=filename,
             ch_id=ch_dict[ch],
             mask=nuclei_labels_mask,
+            overwrite=overwrite_lzma,
         )
     if visualize:
         for ch in ch_dict["fish"]:
@@ -543,6 +545,7 @@ def analyze_image(
             thresh_max=FISH_THRESHOLD_MAX,
             thresh_step=FISH_THRESHOLD_STEP,
             filename_root=filename,
+            overwrite=overwrite_json,
         )
 
     # ###########################################################
@@ -642,57 +645,6 @@ def analyze_image(
         napari.run()
 
 
-# # TODO: ideas to try to detect center of nuclei:
-# #       - Blur segmented, find max, watershed with Vornoi boundaries:
-# #         https://github.com/clEsperanto/pyclesperanto_prototype/blob/master/demo/segmentation/Segmentation_3D.ipynb
-# #         https://github.com/clEsperanto/pyclesperanto_prototype/blob/master/demo/segmentation/voronoi_otsu_labeling.ipynb)
-# #       - Gaussian blur, then 3D Frangi to detect blobness then max of Frangi to detect nuclei
-# #         centers and then use those for watershed.
-# #       - Autocorrelation: cells are about the same size and autocorrelation should peak when
-# #         they overlap. Or use one cell as template and template matching. If we can find the
-# #         centers, we can then use watershed to identify individual cells.
-# #       - Consider a z-by-z segmentation with prior given from neighboring slices.
-# #       - Idea for automated classification: after detecting a few, use a 3x3 block with some classic classification
-# #         method: KNN, SVM, etc. to classify the rest of the image. Use both the original image and the median-filtered
-# #         one to generate the features 3x3 from both. Also other features could include gradient and laplacian of the
-# #         image.
-# #       - You really have to try Random Forest of Extra Tree. Think about a reasonable set of features to use that might
-# #         help identify inside and boundaries. Also check the libraries that are available in Python to extract features
-# #         "Deep learning meets radiomics for end-to-end brain tumor mri analysis" (W. Ponikiewski)
-# #         (https://github.com/wojpon/BT_radiomics/blob/main/feature_extraction.ipynb)
-# #       - Check ICIP2022 paper #1147 (and the following on in the panel - Greek guy)
-# #
-# # # Evaluate and store image properties based on nuclei components
-# # for ch in range(len(channels)):
-# #     comp_props_df = pd.DataFrame(
-# #         ski_mea.regionprops_table(
-# #             nuclei_comp,
-# #             intensity_image=data[ch, ...],
-# #             properties=('label', 'intensity_mean')
-# #         )
-# #     )
-# #     nuclei_props_df = nuclei_props_df.merge(comp_props_df, on='label')
-# #     nuclei_props_df = nuclei_props_df.rename(columns={'intensity_mean': 'intensity_mean_ch{}'.format(channels[ch])})
-
-# # TODO: Software to check:
-# #        - CellProfiler (https://cellprofiler.org/)
-# #        - CellSegm (https://scfbm.biomedcentral.com/articles/10.1186/1751-0473-8-16)
-# #        - SMMF algorithm (https://ieeexplore.ieee.org/document/4671118)
-# #        - Ilastik (https://www.ilastik.org/) for cell segmentation
-# #        - Imaris methods
-# #        - 3D UNET, nnUNET
-# #        - pyradiomics (https://pyradiomics.readthedocs.io/en/latest/index.html) for feature extraction
-# #        - AroSpotFindingSuite (https://gitlab.com/evodevosys/AroSpotFindingSuite) for FISH
-# #        - BlobFinder (software no longer availale but paper is: doi:10.1016/j.cmpb.2008.08.006)
-# #        - FISH-quant (https://code.google.com/archive/p/fish-quant/)
-# #        - ImageM (from https://www.nature.com/articles/nprot.2013.109).
-# #          ImageM and other MATLAB codes developed in our lab are available
-# #          upon request (requests can be addressed to
-# #          S.I. (shalev.itzkovitz@weizmann.ac.il),
-# #          J.P.J. (j.junker@hubrecht.eu) and
-# #          A.v.O. (a.oudenaarden@hubrecht.eu))
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -720,7 +672,17 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
-        "--raw_fish_range",
+        "--nuclei_sigma_range",
+        help="Range (min, max, steps) to use as LOG sigmas for the nuclei detection. (Default: (15, 25, 3))",
+        default=(15, 25, 3),
+    )
+    parser.add_argument(
+        "--nuclei_threshold",
+        help="Threshold to use in LOG for the nuclei detection. (Default: 5)",
+        default=5,
+    )
+    parser.add_argument(
+        "--fish_contrast_range",
         help="Range (min, max) to use for the initial FISH raw data contrast stretching. If not specified, the values will be extracted from each channel.",
         default=None,
     )
@@ -738,13 +700,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--overwrite_json",
-        help="Ignore stored JSON files and overwrite them. (Default: False)",
+        help="Overwrite stored JSON (and CSV) files. (Default: False)",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--overwrite_lzma",
+        help="Overwrite stored LZMA files. (Default: False)",
         default=False,
         action="store_true",
     )
 
-    # If no arguments, invoke with '--help'
-    args = parser.parse_args(args=None if sys.argv[1:] else ["--help"])
+    args = parser.parse_args()
 
     if args.visualize:
         import napari
@@ -757,8 +724,11 @@ if __name__ == "__main__":
         visualize=args.visualize,
         channels=args.channels,
         metadata=args.metadata,
-        raw_fish_range=args.raw_fish_range,
+        fish_contrast_range=args.fish_contrast_range,
         no_cyto=args.no_cyto,
         nuclei_ch1=args.nuclei_ch1,
         overwrite_json=args.overwrite_json,
+        overwrite_lzma=args.overwrite_lzma,
+        nuclei_sigma_range=args.nuclei_sigma_range,
+        nuclei_threshold=args.nuclei_threshold,
     )

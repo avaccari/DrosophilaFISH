@@ -12,13 +12,13 @@ def build_path(filename_root, suffix=None):
     return root_dir if suffix is None else os.path.join(root_dir, file_name + suffix)
 
 
-def save(file, array):
+def save_to_lzma(file, array):
     print("saving data... ", end="", flush=True)
     with lzma.open(f"{file}.lzma", "wb") as f:
         np.save(f, array)
 
 
-def load(file):
+def load_from_lzma(file):
     if not os.path.exists(f"{file}.lzma"):
         raise FileNotFoundError
 
@@ -27,26 +27,32 @@ def load(file):
         return np.load(f)
 
 
-def store_output(function, filename_root=None, ch_id=None, suffix="", args=None):
-    if args is None:
-        args = {}
+def check_lzma(file):
+    return os.path.exists(f"{file}.lzma")
+
+
+def store_to_npy(
+    function, filename_root=None, ch_id=None, suffix="", func_args=None, overwrite=False
+):
+    if func_args is None:
+        func_args = {}
     if filename_root is None:
-        output = function(**args)
+        output = function(**func_args)
     elif ch_id is None:
         raise ValueError(
             "A ch_id should be provided to identify the channel. Segmentation was not evaluated."
         )
     else:
         file = build_path(filename_root, f"-{ch_id}-{suffix}.npy")
-        try:
-            output = load(file)
-        except (FileNotFoundError, ValueError):
-            output = function(**args)
+        if check_lzma(file) and not overwrite:
+            output = load_from_lzma(file)
+        else:
+            output = function(**func_args)
             try:
                 root_dir = build_path(filename_root)
                 if not os.path.isdir(root_dir):
                     os.makedirs(root_dir)
-                save(file, output)
+                save_to_lzma(file, output)
             except Exception:
                 print("WARNING: error saving the file.")
     print("done!")

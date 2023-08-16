@@ -14,18 +14,19 @@ def detect_blobs(
     overlap=0.75,
     filename_root=None,
     ch_id=None,
+    overwrite=False,
 ):
     print("Detecting blobs' centers... ", end="", flush=True)
     if z_y_x_ratio is not None:
         min_sigma = min_sigma * np.array(z_y_x_ratio)
         max_sigma = max_sigma * np.array(z_y_x_ratio)
 
-    blobs_ctrs = os_utils.store_output(
+    blobs_ctrs = os_utils.store_to_npy(
         ski_fea.blob_log,
         filename_root=filename_root,
         ch_id=ch_id,
         suffix=f"blb-{tuple(np.round(min_sigma, decimals=2))}-{tuple(np.round(max_sigma, decimals=2))}",
-        args={
+        func_args={
             "image": data,
             "min_sigma": min_sigma,
             "max_sigma": max_sigma,
@@ -34,6 +35,7 @@ def detect_blobs(
             "overlap": overlap,
             "exclude_border": True,
         },
+        overwrite=overwrite,
     )
 
     print("done!")
