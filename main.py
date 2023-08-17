@@ -679,9 +679,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--nuclei_threshold",
-        help="Threshold to use in LOG for the nuclei detection. (Default: 5)",
+        help="Threshold to use in LOG for the nuclei detection. (Default: 10)",
         type=float,
-        default=5,
+        default=10,
     )
     parser.add_argument(
         "--fish_contrast_range",
