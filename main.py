@@ -9,6 +9,7 @@ import pandas as pd
 import skimage.measure as ski_mea
 import skimage.morphology as ski_mor
 from colorama import Fore, Style
+from threading import Thread, Lock
 
 import os_utils
 from features import detect_blobs
@@ -679,6 +680,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--nuclei_threshold",
         help="Threshold to use in LOG for the nuclei detection. (Default: 5)",
+        type=float,
         default=5,
     )
     parser.add_argument(
