@@ -32,8 +32,9 @@ def analyze_image(
     fish_contrast_range=None,
     no_cyto=False,
     nuclei_ch1=False,
-    overwrite_json=False,
-    overwrite_lzma=False,
+    regenerate_pre=False,
+    regenerate_nuclei=False,
+    regenerate_fish=False,
     nuclei_sigma_range=(15, 25, 3),
     nuclei_threshold=5,
 ):
@@ -175,6 +176,8 @@ def analyze_image(
             visible=False,
         )
 
+    # Start pre-processing #######################################################
+
     # Contrast stretch nuclei and cyto
     for ch in ch_dict["others"]:
         data[ch] = contrast_stretch(data[ch], ch_id=ch_dict[ch])
@@ -216,7 +219,7 @@ def analyze_image(
             sigma=100 * np.array((1 / spacing_ratio, 1, 1)),
             filename_root=filename,
             ch_id=ch_dict[ch],
-            overwrite=overwrite_lzma,
+            overwrite=regenerate_pre,
         )
 
     # Contrast stretch nuclei and cyto
@@ -255,7 +258,7 @@ def analyze_image(
         footprint=ski_mor.ball(7)[3::4],
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Nuclei"]],
-        overwrite=overwrite_lzma,
+        overwrite=regenerate_pre,
     )
     if visualize:
         viewer.add_image(
@@ -268,25 +271,28 @@ def analyze_image(
             visible=False,
         )
 
-    # Apply median filter to denoise the cytoplasm channel
-    print("Denoising cytoplasm's channel:")
-    cyto_den = filter(
-        data[ch_dict["Cytoplasm"]],
-        footprint=ski_mor.ball(7)[3::4],
-        filename_root=filename,
-        ch_id=ch_dict[ch_dict["Cytoplasm"]],
-        overwrite=overwrite_lzma,
-    )
-    if visualize:
-        viewer.add_image(
-            cyto_den,
-            name=ch_dict[ch_dict["Cytoplasm"]] + "-den",
-            colormap="gray",
-            blending="additive",
-            scale=spacing,
-            interpolation="nearest",
-            visible=False,
+    if not no_cyto:
+        # Apply median filter to denoise the cytoplasm channel
+        print("Denoising cytoplasm's channel:")
+        cyto_den = filter(
+            data[ch_dict["Cytoplasm"]],
+            footprint=ski_mor.ball(7)[3::4],
+            filename_root=filename,
+            ch_id=ch_dict[ch_dict["Cytoplasm"]],
+            overwrite=regenerate_pre,
         )
+        if visualize:
+            viewer.add_image(
+                cyto_den,
+                name=ch_dict[ch_dict["Cytoplasm"]] + "-den",
+                colormap="gray",
+                blending="additive",
+                scale=spacing,
+                interpolation="nearest",
+                visible=False,
+            )
+
+    # Nuclei detection ###########################################################
 
     # TODO: following the threshold with the nearest neighbor creates some regions
     #       that have the same ID but are segmented. There might be multiple
@@ -318,7 +324,7 @@ def analyze_image(
         threshold=nuclei_threshold,
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Nuclei"]],
-        overwrite=overwrite_lzma,
+        overwrite=regenerate_nuclei,
     )
 
     # # Create dataframe with nuclei centers and assign IDs
@@ -361,7 +367,7 @@ def analyze_image(
         spacing=(spacing_ratio, 1, 1),
         filename_root=filename,
         ch_id="Volume",
-        overwrite=overwrite_lzma,
+        overwrite=regenerate_nuclei,
     )
     if visualize:
         nuclei_vor = viewer.add_labels(
@@ -377,7 +383,7 @@ def analyze_image(
     nuclei = NucleiSegmentation(
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Nuclei"]],
-        overwrite=overwrite_lzma,
+        overwrite=regenerate_nuclei,
     )
     nuclei_labels = nuclei.segment(
         labels=nuclei_regions,
@@ -474,6 +480,8 @@ def analyze_image(
 
     print("Nuclei's properties:\n", nuclei_props_df)
 
+    # FISH detection ##############################################################
+
     # Identify FISH puncta
     print("Identifying FISH puncta's centers within nuclei...")
     # To minimize difference between channels, we are pre-building the images
@@ -518,7 +526,7 @@ def analyze_image(
             filename_root=filename,
             ch_id=ch_dict[ch],
             mask=nuclei_labels_mask,
-            overwrite=overwrite_lzma,
+            overwrite=regenerate_fish,
         )
     if visualize:
         for ch in ch_dict["fish"]:
@@ -546,7 +554,7 @@ def analyze_image(
             thresh_max=FISH_THRESHOLD_MAX,
             thresh_step=FISH_THRESHOLD_STEP,
             filename_root=filename,
-            overwrite=overwrite_json,
+            overwrite=regenerate_fish,
         )
 
     # ###########################################################
@@ -701,14 +709,20 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
-        "--overwrite_json",
-        help="Overwrite stored JSON (and CSV) files. (Default: False)",
+        "--regenerate_pre",
+        help="Regenerate stored file associated with pre-processing. (Default: False)",
         default=False,
         action="store_true",
     )
     parser.add_argument(
-        "--overwrite_lzma",
-        help="Overwrite stored LZMA files. (Default: False)",
+        "--regenerate_nuclei",
+        help="Regenerate stored file associated with nuclei detection. (Default: False)",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--regenerate_fish",
+        help="Regenerate stored file associated with FISH detection. (Default: False)",
         default=False,
         action="store_true",
     )
@@ -729,8 +743,9 @@ if __name__ == "__main__":
         fish_contrast_range=args.fish_contrast_range,
         no_cyto=args.no_cyto,
         nuclei_ch1=args.nuclei_ch1,
-        overwrite_json=args.overwrite_json,
-        overwrite_lzma=args.overwrite_lzma,
+        regenerate_pre=args.regenerate_pre,
+        regenerate_nuclei=args.regenerate_nuclei,
+        regenerate_fish=args.regenerate_fish,
         nuclei_sigma_range=args.nuclei_sigma_range,
         nuclei_threshold=args.nuclei_threshold,
     )

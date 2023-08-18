@@ -22,22 +22,31 @@
       "args": ["--visualize"]
     },
     {
-      "name": "Python: main.py (--overwrite_lzma)",
+      "name": "Python: main.py (--regenerate_pre)",
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--overwrite_lzma"]
+      "args": ["--regenerate_pre"]
     },
     {
-      "name": "Python: main.py (--overwrite_json)",
+      "name": "Python: main.py (--regenerate_nuclei)",
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--overwrite_json"]
+      "args": ["--regenerate_nuclei"]
+    },
+    {
+      "name": "Python: main.py (--regenerate_fish)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--regenerate_fish"]
     },
     {
       "name": "Python: DBG_ALL main.py (--visualize)",
