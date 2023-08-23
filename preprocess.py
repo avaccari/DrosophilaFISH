@@ -38,6 +38,7 @@ def filter(
     filename_root=None,
     ch_id=None,
     overwrite=False,
+    out_dir=None,
 ):
     filtered = data.copy()
 
@@ -77,6 +78,7 @@ def filter(
         suffix=suffix,
         func_args=args,
         overwrite=overwrite,
+        out_dir=out_dir,
     )
 
     print("done!")
@@ -91,6 +93,7 @@ def remove_floor(
     ch_id=None,
     mask=None,
     overwrite=False,
+    out_dir=None,
 ):
     print(f"Removing floor from {Fore.GREEN}{Style.BRIGHT}{ch_id}{Style.RESET_ALL}:")
     input_min, input_median, input_max = eval_stats(data, mask=mask)
@@ -101,6 +104,7 @@ def remove_floor(
         filename_root=filename_root,
         ch_id=ch_id,
         overwrite=overwrite,
+        out_dir=out_dir,
     )
     defloored = data.astype("int16") - noise_floor.astype("int16")
     defloored = np.maximum(defloored, 0).astype("uint8")

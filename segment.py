@@ -10,10 +10,11 @@ import os_utils
 
 
 class Segmentation(ABC):
-    def __init__(self, filename_root, ch_id, overwrite=False):
+    def __init__(self, filename_root, ch_id, overwrite=False, out_dir=None):
         self.filename_root = filename_root
         self.ch_id = ch_id
         self.overwrite = overwrite
+        self.out_dir = out_dir
 
     @abstractmethod
     def _cost(self, threshold, temp_region, temp_values):
@@ -182,6 +183,7 @@ class Segmentation(ABC):
                 "centers": centers,
             },
             overwrite=self.overwrite,
+            out_dir=self.out_dir,
         )
         # If we are writing to tiff
         if write_to_tiff:
@@ -190,14 +192,15 @@ class Segmentation(ABC):
                 filename_root=self.filename_root,
                 ch_id=self.ch_id,
                 suffix="labels",
+                out_dir=self.out_dir,
             )
         print("done!")
         return labels
 
 
 class NucleiSegmentation(Segmentation):
-    def __init__(self, filename_root, ch_id, overwrite=False):
-        super().__init__(filename_root, ch_id, overwrite=overwrite)
+    def __init__(self, filename_root, ch_id, overwrite=False, out_dir=None):
+        super().__init__(filename_root, ch_id, overwrite=overwrite, out_dir=out_dir)
 
     def _cost(self, t, temp_region, temp_values):
         msk = np.zeros_like(temp_region, dtype="bool")

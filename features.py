@@ -15,6 +15,7 @@ def detect_blobs(
     filename_root=None,
     ch_id=None,
     overwrite=False,
+    out_dir=None,
 ):
     print("Detecting blobs' centers... ", end="", flush=True)
     if z_y_x_ratio is not None:
@@ -36,6 +37,7 @@ def detect_blobs(
             "exclude_border": True,
         },
         overwrite=overwrite,
+        out_dir=out_dir,
     )
 
     print("done!")

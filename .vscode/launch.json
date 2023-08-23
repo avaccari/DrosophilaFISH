@@ -49,6 +49,15 @@
       "args": ["--regenerate_fish"]
     },
     {
+      "name": "Python: main.py (--output_dir /tmp)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--output_dir=/tmp"]
+    },
+    {
       "name": "Python: DBG_ALL main.py (--visualize)",
       "type": "python",
       "request": "launch",

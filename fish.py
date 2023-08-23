@@ -177,6 +177,7 @@ def get_fish_puncta(
     filename_root=None,
     ch_id=None,
     overwrite=False,
+    out_dir=None,
 ):
     if ch_id is None:
         raise ValueError(
@@ -198,10 +199,12 @@ def get_fish_puncta(
         file_puncta = os_utils.build_path(
             filename_root,
             f"-{ch_id}-puncta-df-({thresh_min}-{thresh_max}-{thresh_step})",
+            out_dir=out_dir,
         )
         file_props = os_utils.build_path(
             filename_root,
             f"-{ch_id}-puncta-props-df-({thresh_min}-{thresh_max}-{thresh_step})",
+            out_dir=out_dir,
         )
         if (
             os.path.exists(file_puncta + ".json")
@@ -223,7 +226,7 @@ def get_fish_puncta(
                 thresh_step,
             )
             try:
-                root_dir = os_utils.build_path(filename_root)
+                root_dir = os_utils.build_path(filename_root, out_dir=out_dir)
                 if not osp.isdir(root_dir):
                     os.makedirs(root_dir)
                 fish_puncta_df.to_json(file_puncta + ".json")

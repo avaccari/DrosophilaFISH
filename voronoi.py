@@ -18,7 +18,13 @@ def _evaluate_voronoi(mask, markers, spacing=(1, 1, 1)):
 
 
 def evaluate_voronoi(
-    mask, markers, spacing=(1, 1, 1), filename_root=None, ch_id=None, overwrite=False
+    mask,
+    markers,
+    spacing=(1, 1, 1),
+    filename_root=None,
+    ch_id=None,
+    overwrite=False,
+    out_dir=None,
 ):
     # Find the equivalent to Voronoi regions in the provided mask based on the
     # provided markers
@@ -40,6 +46,7 @@ def evaluate_voronoi(
             "spacing": spacing,
         },
         overwrite=overwrite,
+        out_dir=out_dir,
     )
 
     print("done!")

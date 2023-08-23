@@ -1,6 +1,5 @@
 import argparse
 import os.path as osp
-import sys
 from tkinter import filedialog
 
 import matplotlib.pyplot as plt
@@ -9,7 +8,6 @@ import pandas as pd
 import skimage.measure as ski_mea
 import skimage.morphology as ski_mor
 from colorama import Fore, Style
-from threading import Thread, Lock
 
 import os_utils
 from features import detect_blobs
@@ -37,6 +35,7 @@ def analyze_image(
     regenerate_fish=False,
     nuclei_sigma_range=(15, 25, 3),
     nuclei_threshold=5,
+    out_dir=None,
 ):
     # Ask user to choose a file
     print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}")
@@ -220,6 +219,7 @@ def analyze_image(
             filename_root=filename,
             ch_id=ch_dict[ch],
             overwrite=regenerate_pre,
+            out_dir=out_dir,
         )
 
     # Contrast stretch nuclei and cyto
@@ -259,6 +259,7 @@ def analyze_image(
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Nuclei"]],
         overwrite=regenerate_pre,
+        out_dir=out_dir,
     )
     if visualize:
         viewer.add_image(
@@ -280,6 +281,7 @@ def analyze_image(
             filename_root=filename,
             ch_id=ch_dict[ch_dict["Cytoplasm"]],
             overwrite=regenerate_pre,
+            out_dir=out_dir,
         )
         if visualize:
             viewer.add_image(
@@ -325,6 +327,7 @@ def analyze_image(
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Nuclei"]],
         overwrite=regenerate_nuclei,
+        out_dir=out_dir,
     )
 
     # # Create dataframe with nuclei centers and assign IDs
@@ -368,6 +371,7 @@ def analyze_image(
         filename_root=filename,
         ch_id="Volume",
         overwrite=regenerate_nuclei,
+        out_dir=out_dir,
     )
     if visualize:
         nuclei_vor = viewer.add_labels(
@@ -384,6 +388,7 @@ def analyze_image(
         filename_root=filename,
         ch_id=ch_dict[ch_dict["Nuclei"]],
         overwrite=regenerate_nuclei,
+        out_dir=out_dir,
     )
     nuclei_labels = nuclei.segment(
         labels=nuclei_regions,
@@ -527,6 +532,7 @@ def analyze_image(
             ch_id=ch_dict[ch],
             mask=nuclei_labels_mask,
             overwrite=regenerate_fish,
+            out_dir=out_dir,
         )
     if visualize:
         for ch in ch_dict["fish"]:
@@ -555,6 +561,7 @@ def analyze_image(
             thresh_step=FISH_THRESHOLD_STEP,
             filename_root=filename,
             overwrite=regenerate_fish,
+            out_dir=out_dir,
         )
 
     # ###########################################################
@@ -594,6 +601,7 @@ def analyze_image(
     path = os_utils.build_path(
         filename,
         f"-{ch_dict[ch_dict['Nuclei']]}-df-({FISH_THRESHOLD_MIN}-{FISH_THRESHOLD_MAX}-{FISH_THRESHOLD_STEP})",
+        out_dir=out_dir,
     )
     nuclei_props_df.to_json(path + ".json")
     nuclei_props_df.to_csv(path + ".csv")
@@ -726,6 +734,10 @@ if __name__ == "__main__":
         default=False,
         action="store_true",
     )
+    parser.add_argument(
+        "--output_dir",
+        help="Directory where to look for and store the folder containing results and auxiliary files. (Default: the same directory as the input file)",
+    )
 
     args = parser.parse_args()
 
@@ -748,4 +760,5 @@ if __name__ == "__main__":
         regenerate_fish=args.regenerate_fish,
         nuclei_sigma_range=args.nuclei_sigma_range,
         nuclei_threshold=args.nuclei_threshold,
+        out_dir=args.output_dir,
     )
