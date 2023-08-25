@@ -34,7 +34,7 @@ def analyze_image(
     regenerate_nuclei=False,
     regenerate_fish=False,
     nuclei_sigma_range=(15, 25, 3),
-    nuclei_threshold=5,
+    nuclei_threshold=20,
     out_dir=None,
 ):
     # Ask user to choose a file
@@ -695,9 +695,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--nuclei_threshold",
-        help="Threshold to use in LOG for the nuclei detection. (Default: 10)",
+        help="Threshold to use in LOG for the nuclei detection. (Default: 20)",
         type=float,
-        default=10,
+        default=20,
     )
     parser.add_argument(
         "--fish_contrast_range",
