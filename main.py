@@ -140,7 +140,7 @@ def analyze_image(
         print(f"  {k}: {c:9} <=> {v}")
     print(f"{Style.BRIGHT}Pixel sizes (Z, Y, X):{Style.RESET_ALL}")
     print(f"  {spacing}")
-    print(f"{Style.BRIGHT}Spacing ratio (Z / X or Y):")
+    print(f"{Style.BRIGHT}Spacing ratio (Z / X or Y):{Style.RESET_ALL}")
     print(f"  {spacing_ratio}")
     print(f"{Style.BRIGHT}Data type:{Style.RESET_ALL}")
     for k, v in image.type_meta.items():
@@ -153,6 +153,36 @@ def analyze_image(
 
     print(
         f"{Style.BRIGHT}{Fore.BLUE}#########################################{Style.RESET_ALL}"
+    )
+    print(
+        f"{Style.BRIGHT}{Fore.BLUE}\n########## Analysis parameters: #########{Style.RESET_ALL}"
+    )
+    print(
+        f"{Style.BRIGHT}Nuclei detection sigma range (start, end, steps):{Style.RESET_ALL} {nuclei_sigma_range}"
+    )
+    print(
+        f"{Style.BRIGHT}Nuclei detection threshold:{Style.RESET_ALL} {nuclei_threshold}"
+    )
+    print(
+        f"{Style.BRIGHT}FISH contrast stretching range (None => full range):{Style.RESET_ALL} {fish_contrast_range}"
+    )
+    print(
+        f"{Style.BRIGHT}FISH detection threshold range (start, end, step_size):{Style.RESET_ALL} {(FISH_THRESHOLD_MIN, FISH_THRESHOLD_MAX, FISH_THRESHOLD_STEP)}"
+    )
+    print(
+        f"{Style.BRIGHT}Regenerate pre-processing data:{Style.RESET_ALL} {regenerate_pre}"
+    )
+    print(
+        f"{Style.BRIGHT}Regenerate nuclei detection data:{Style.RESET_ALL} {regenerate_nuclei}"
+    )
+    print(
+        f"{Style.BRIGHT}Regenerate FISH detection data:{Style.RESET_ALL} {regenerate_fish}"
+    )
+    print(f"{Style.BRIGHT}Output folder:{Style.RESET_ALL}")
+    print(f"  {os_utils.build_path(filename, suffix=None, out_dir=out_dir)}")
+
+    print(
+        f"{Style.BRIGHT}{Fore.BLUE}\n#########################################{Style.RESET_ALL}"
     )
 
     # Stop if we only want the metadata
@@ -690,7 +720,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--nuclei_sigma_range",
-        help="Range (min, max, steps) to use as LOG sigmas for the nuclei detection. (Default: (15, 25, 3))",
+        help="Range (min, max, steps) to use as LOG sigmas for the nuclei detection. (Default: 15, 25, 3))",
         default=(15, 25, 3),
     )
     parser.add_argument(
