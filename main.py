@@ -182,7 +182,7 @@ def analyze_image(
     print(f"  {os_utils.build_path(filename, suffix=None, out_dir=out_dir)}")
 
     print(
-        f"{Style.BRIGHT}{Fore.BLUE}\n#########################################{Style.RESET_ALL}"
+        f"{Style.BRIGHT}{Fore.BLUE}#########################################{Style.RESET_ALL}"
     )
 
     # Stop if we only want the metadata
@@ -742,7 +742,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--nuclei_ch1",
-        help="Specifies that the nuclei are in channel 1. (Default: False)",
+        help="Specifies that the nuclei are in channel 1 instead of channel 0. (Default: False)",
         default=False,
         action="store_true",
     )

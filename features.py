@@ -4,6 +4,16 @@ import skimage.feature as ski_fea
 import os_utils
 
 
+# Note: The radius of each blob is approximately sqrt(2) * sigma for 2D and
+# sqrt(3) * sigma for 3D.
+# Ex: LPLC2 nuclei are about 6.5um in diameter. If the resolution of the image
+#     is 0.092um/px, then the nuclei are about 70px in diameter. If we want to
+#     detect blobs of 6.5um in diameter, then we need to use a sigma of
+#     70px/2/sqrt(3) = 20.2px. The search range should include this value.
+#     For Giant Fiber nuclei, the largest diameter can be around 12um, so the
+#     sigma should be 12um/0.092um/2/sqrt(3) = 34.6px (for images with the same
+#     resolution). The main problem with LPLC2 is that the nuclei can be very
+#     non-spherical.
 def detect_blobs(
     data,
     min_sigma=1,

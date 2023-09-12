@@ -5,6 +5,13 @@ import lzma
 import tifffile
 
 
+class OsUtils:
+    def __init__(self, filename_root=None, out_dir=None, overwrite=False):
+        self.filename_root = filename_root
+        self.out_dir = out_dir
+        self.overwrite = overwrite
+
+
 def build_path(filename_root, suffix=None, out_dir=None):
     dir, file = os.path.split(filename_root)
     file_name, _ = os.path.splitext(file)
@@ -64,7 +71,7 @@ def store_to_npy(
                 save_to_lzma(file, output)
             except Exception:
                 print("WARNING: error saving the file.")
-    print("done!")
+    print("done!", end="", flush=True)
     return output
 
 
