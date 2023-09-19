@@ -24,6 +24,7 @@ from voronoi import evaluate_voronoi
 
 def analyze_image(
     filename=None,
+    nuclei_npy=None,
     visualize=False,
     channels=4,
     metadata=False,
@@ -39,7 +40,7 @@ def analyze_image(
 ):
     # Ask user to choose a file
     print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}")
-    if filename is None:
+    if filename is None and nuclei_npy is None:
         filename = filedialog.askopenfilename()
         if filename == "":
             raise ValueError("A .czi file should be provided for analysis.")
@@ -694,10 +695,15 @@ def analyze_image(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    exclusive_inputs = parser.add_mutually_exclusive_group()
+    exclusive_inputs.add_argument(
         "--file",
         help="CZI file to analyze. If not specified, the user will be asked to select a file.",
         default=None,
+    )
+    exclusive_inputs.add_argument(
+        "--nuclei_npy",
+        help="Numpy file containing the nuclei's channel.",
     )
     parser.add_argument(
         "--visualize",
@@ -779,6 +785,7 @@ if __name__ == "__main__":
 
     analyze_image(
         args.file,
+        args.nuclei_npy,
         visualize=args.visualize,
         channels=args.channels,
         metadata=args.metadata,
