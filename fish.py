@@ -33,7 +33,9 @@ def _detections_at_thres(
 
     for n_idx, n_row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
         lbl = n_row["label"]
-        print(f" - {n_idx + 1:3}/{len(nuclei_props_df):3} (lbl: {lbl:3}) ---")
+        print(
+            f"{Style.BRIGHT}Nucleus {n_idx + 1:3}/{len(nuclei_props_df):3} (lbl: {lbl:3}){Style.RESET_ALL}"
+        )
         sl = n_row["slice"]
 
         # Add a little buffer around based on MAX_SIGMA
@@ -75,8 +77,7 @@ def _detections_at_thres(
             detections_at_thrs[lbl] = df
 
         print(
-            f"Detected {Fore.BLUE}{len(df):3d} puncta{Style.RESET_ALL} ({len(df) / n_row['area']:.4f} puncta/pixel)\033[3F",
-            end="",
+            f"Detected {Fore.BLUE}{len(df):3d} puncta{Style.RESET_ALL}",
         )
     return detections_at_thrs
 
@@ -95,8 +96,7 @@ def _get_fish_puncta(
     props_df = pd.DataFrame()
     for threshold in np.arange(thresh_min, thresh_max, thresh_step):
         print(
-            f"--- Ch: {ch_id} - Thrs: {thresh_min} => {threshold} => {thresh_max}",
-            end="",
+            f"{Fore.GREEN}--- Ch: {ch_id} - Thrs: {thresh_min} => {threshold} => {thresh_max} ---{Style.RESET_ALL}"
         )
         detections_at_thrs = _detections_at_thres(
             fish_channel,
@@ -156,7 +156,7 @@ def _get_fish_puncta(
         props_df = (
             df.copy() if props_df.empty else props_df.merge(df, on="label", how="left")
         )
-    print("\033[3E")  # Move cursor down three lines
+
     # Fill missing counts with zeros and missing ids with empty lists
     filt = props_df.filter(regex="cnt")
     props_df[filt.columns] = filt.fillna(0)

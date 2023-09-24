@@ -32,7 +32,7 @@ def detect_blobs(
         min_sigma = min_sigma * np.array(z_y_x_ratio)
         max_sigma = max_sigma * np.array(z_y_x_ratio)
 
-    blobs_ctrs = os_utils.store_to_npy(
+    blobs_centers = os_utils.store_to_npy(
         ski_fea.blob_log,
         filename_root=filename_root,
         ch_id=ch_id,
@@ -52,4 +52,4 @@ def detect_blobs(
 
     print("done!")
 
-    return blobs_ctrs
+    return blobs_centers

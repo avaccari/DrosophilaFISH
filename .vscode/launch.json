@@ -58,6 +58,15 @@
       "args": ["--output_dir=/tmp"]
     },
     {
+      "name": "Python: main.py (--visualize --output_dir /tmp)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--visualize", "--output_dir=/tmp"]
+    },
+    {
       "name": "Python: DBG_ALL main.py (--visualize)",
       "type": "python",
       "request": "launch",
@@ -76,13 +85,13 @@
       "args": ["--nuclei_ch1"]
     },
     {
-      "name": "Python: main.py (--metadata)",
+      "name": "Python: main.py (--metadata_only)",
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--metadata"]
+      "args": ["--metadata_only"]
     },
     {
       "name": "Python: main.py (--visualize --nuclei_ch1)",
@@ -138,6 +147,31 @@
       "console": "integratedTerminal",
       "justMyCode": true,
       "args": ["--visualize", "--channels=3"]
+    },
+    {
+      "name": "Python: main.py (--metadata_only --resolution 2.0 0.208 0.208)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--metadata_only", "--resolution", "2.0", "0.208", "0.208"]
+    },
+    {
+      "name": "Python: main.py (--visualize --channels 1 --resolution 2.0 0.208 0.208)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--visualize",
+        "--channels=1",
+        "--resolution",
+        "2.0",
+        "0.208",
+        "0.208"
+      ]
     }
   ]
 }
