@@ -55,7 +55,7 @@
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--output_dir=/tmp"]
+      "args": ["--output_dir", "tmp"]
     },
     {
       "name": "Python: main.py (--visualize --output_dir /tmp)",
@@ -64,7 +64,16 @@
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--visualize", "--output_dir=/tmp"]
+      "args": ["--visualize", "--output_dir", "/tmp"]
+    },
+    {
+      "name": "Python: main.py (--visualize --output_dir /tmp --no_fish)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--visualize", "--output_dir", "/tmp", "--no_fish"]
     },
     {
       "name": "Python: DBG_ALL main.py (--visualize)",
@@ -109,7 +118,7 @@
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--channels=3"]
+      "args": ["--channels", "3"]
     },
     {
       "name": "Python: main.py (--visualize --channels 3)",
@@ -118,7 +127,7 @@
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--visualize", "--channels=3"]
+      "args": ["--visualize", "--channels", "3"]
     },
     {
       "name": "Python: main.py (--visualize --channels 3 --no_cyto)",
@@ -127,7 +136,7 @@
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--visualize", "--channels=3", "--no_cyto"]
+      "args": ["--visualize", "--channels", "3", "--no_cyto"]
     },
 
     {
@@ -146,7 +155,7 @@
       "program": "${workspaceFolder}/main-run-KEEP.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--visualize", "--channels=3"]
+      "args": ["--visualize", "--channels", "3"]
     },
     {
       "name": "Python: main.py (--metadata_only --resolution 2.0 0.208 0.208)",
