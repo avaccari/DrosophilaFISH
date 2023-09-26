@@ -77,8 +77,9 @@ def _detections_at_thres(
             detections_at_thrs[lbl] = df
 
         print(
-            f"Detected {Fore.BLUE}{len(df):3d} puncta{Style.RESET_ALL}",
+            f"Detected {Fore.BLUE}{len(df):3d} puncta{Style.RESET_ALL}\033[3F",
         )
+    print("\033[3E")
     return detections_at_thrs
 
 
