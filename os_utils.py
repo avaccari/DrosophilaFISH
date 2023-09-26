@@ -71,7 +71,6 @@ def store_to_npy(
                 save_to_lzma(file, output)
             except Exception:
                 print("WARNING: error saving the file.")
-    print("done!", end="", flush=True)
     return output
 
 
