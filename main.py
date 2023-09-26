@@ -28,6 +28,7 @@ def analyze_image(
     visualize=False,
     channels=4,
     metadata_only=False,
+    no_fish=False,
     fish_contrast_range=None,
     fish_threshold_range=[2, 10.5, 0.5],
     cytoplasm_ch=3,
@@ -434,7 +435,21 @@ def analyze_image(
 
     print("Nuclei's properties:\n", nuclei_props_df)
 
+    # Save the nuclei properties dataframe
+    path = os_utils.build_path(
+        filename,
+        f"-{image.ch_dict[image.ch_dict['Nuclei']]}-df",
+        out_dir=out_dir,
+    )
+    nuclei_props_df.to_json(path + ".json")
+    nuclei_props_df.to_csv(path + ".csv")
+
     # FISH detection ##############################################################
+    if no_fish:
+        print(f"{Fore.RED}{Style.BRIGHT}--- Analysis finished ---{Style.RESET_ALL}\n\n")
+        if visualize:
+            napari.run()
+        return
 
     # Identify FISH puncta
     print("Identifying FISH puncta's centers within nuclei...")
@@ -533,7 +548,7 @@ def analyze_image(
     #         chunk = image.data[ch][slc[0], slc[1], slc[2]]
     # #########################################################
 
-    # Merge to nuclei props dataframe
+    # Merge FISH to nuclei props dataframe
     for ch in image.ch_dict["fish"]:
         if not props_df[ch].empty:
             nuclei_props_df = nuclei_props_df.merge(
@@ -548,10 +563,10 @@ def analyze_image(
         nuclei_props_df.notna().applymap(lambda x: x or [])
     )
 
-    # Save the nuclei properties dataframe
+    # Save the nuclei + FISH properties dataframe
     path = os_utils.build_path(
         filename,
-        f"-{image.ch_dict[image.ch_dict['Nuclei']]}-df-({fish_threshold_range[0]}-{fish_threshold_range[1]}-{fish_threshold_range[2]})",
+        f"-{image.ch_dict[image.ch_dict['Nuclei']]}-FISH-df-({fish_threshold_range[0]}-{fish_threshold_range[1]}-{fish_threshold_range[2]})",
         out_dir=out_dir,
     )
     nuclei_props_df.to_json(path + ".json")
@@ -687,6 +702,13 @@ if __name__ == "__main__":
         default=[2, 10.5, 0.5],
     )
     parser.add_argument(
+        "--no_fish",
+        help="Don't perform the FISH detection. (Default: False)",
+        default=False,
+        action="store_true",
+    )
+
+    parser.add_argument(
         "--regenerate_pre",
         help="Regenerate stored file associated with pre-processing. (Default: False)",
         default=False,
@@ -727,6 +749,7 @@ if __name__ == "__main__":
         fish_threshold_range=args.fish_threshold_range,
         cytoplasm_ch=args.cytoplasm_ch,
         nuclei_ch=args.nuclei_ch,
+        no_fish=args.no_fish,
         regenerate_pre=args.regenerate_pre,
         regenerate_nuclei=args.regenerate_nuclei,
         regenerate_fish=args.regenerate_fish,
