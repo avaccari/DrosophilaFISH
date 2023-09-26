@@ -151,10 +151,17 @@ class Segmentation(ABC):
             threshold_min = self._find_min_threshold(start, temp_region, temp_values)
             temp_mask = np.zeros_like(temp_region, dtype="bool")
             temp_mask[temp_region] = temp_values[temp_region] >= threshold_min
-            #! Make sure that, after opening, you are not creating more than one
-            #! connected component. In which case, decide what to do.
+
             temp_mask_open = ski_mor.opening(temp_mask, footprint=ski_mor.ball(5)[2::3])
-            #!
+            # If the opening creates more than one connected component, keep the largest
+            temp_mask_open_labels = ski_mea.label(temp_mask_open)
+            components = ski_mea.regionprops(temp_mask_open_labels)
+            if len(components) > 1:
+                area_max = np.max([c.area for c in components])
+                for c in components:
+                    if c.area < area_max:
+                        temp_mask_open[temp_mask_open_labels == c.label] = 0
+
             # Verify that the mask can be added to the labels
             result, reason = self._mask_ok(
                 temp_mask_open, centers, z_min, z_max, y_min, y_max, x_min, x_max
@@ -220,8 +227,8 @@ class NucleiSegmentation(Segmentation):
         # volume = in_idx.sum()
         # volume_val = temp_values[in_idx].sum()
 
-        table = ski_mea.regionprops_table(ski_mea.label(msk))
-        objects = len(table["label"])
+        table = ski_mea.regionprops(ski_mea.label(msk))
+        objects = len(table)
 
         return (
             # out_mean_var + in_mean_var - surface + (0 if (objects == 1) else np.inf),
@@ -235,4 +242,6 @@ class CytoplasmSegmentation(Segmentation):
         super().__init__(filename_root, ch_id)
 
     def _cost(self, t, temp_mask, temp_region, temp_values):
+        # Note: the cost should include the fact that the corresponding nucleus
+        # should be fully contained in the cytoplasm.
         pass
