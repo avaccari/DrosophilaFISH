@@ -95,7 +95,7 @@ def analyze_image(
         f"{Style.BRIGHT}{Fore.BLUE}#########################################{Style.RESET_ALL}"
     )
 
-    # --- Development only: shrink data ---
+    # --- Development only: crop data ---
     dds = [np.floor(d // 4).astype("uint16") for d in image.data.shape]
     dde = [np.ceil(d - d // 4).astype("uint16") for d in image.data.shape]
     image.data = image.data[:, dds[1] : dde[1], dds[2] : dde[2], dds[3] : dde[3]]
@@ -107,13 +107,11 @@ def analyze_image(
         viewer = napari.Viewer(title=osp.split(filename)[1], ndisplay=3)
         viewer.add_image(
             image.data,
-            channel_axis=0 if image.channels_no > 1 else None,
-            name=[n + "-orig" for (c, n) in image.ch_dict.items() if isinstance(c, int)]
-            if image.channels_no > 1
-            else image.ch_dict[image.ch_dict["Nuclei"]] + "-orig",
-            colormap=image.ch_dict["colormaps"]
-            if image.channels_no > 1
-            else image.ch_dict["colormaps"][image.ch_dict["Nuclei"]],
+            channel_axis=0,
+            name=[
+                n + "-orig" for (c, n) in image.ch_dict.items() if isinstance(c, int)
+            ],
+            colormap=image.ch_dict["colormaps"],
             blending="additive",
             scale=image.scaling,
             depiction="volume",
@@ -128,18 +126,19 @@ def analyze_image(
         image.data[ch] = contrast_stretch(image.data[ch], ch_id=image.ch_dict[ch])
 
     # Contrast stretch the FISH channels
-    min_intensity, max_intensity = np.inf, -np.inf
-    for ch in image.ch_dict["fish"]:
-        min_intensity = min(min_intensity, image.data[ch].min())
-        max_intensity = max(max_intensity, image.data[ch].max())
-    for ch in image.ch_dict["fish"]:
-        image.data[ch] = contrast_stretch(
-            image.data[ch],
-            ch_id=image.ch_dict[ch],
-            in_range=(min_intensity, max_intensity)
-            if fish_contrast_range is None
-            else (fish_contrast_range[0], fish_contrast_range[1]),
-        )
+    if "fish" in image.ch_dict and not no_fish:
+        min_intensity, max_intensity = np.inf, -np.inf
+        for ch in image.ch_dict["fish"]:
+            min_intensity = min(min_intensity, image.data[ch].min())
+            max_intensity = max(max_intensity, image.data[ch].max())
+        for ch in image.ch_dict["fish"]:
+            image.data[ch] = contrast_stretch(
+                image.data[ch],
+                ch_id=image.ch_dict[ch],
+                in_range=(min_intensity, max_intensity)
+                if fish_contrast_range is None
+                else (fish_contrast_range[0], fish_contrast_range[1]),
+            )
 
     # If needed, convert to uint8
     if image.data.dtype != "uint8":
@@ -173,27 +172,25 @@ def analyze_image(
         image.data[ch] = contrast_stretch(image.data[ch], ch_id=image.ch_dict[ch])
 
     # Contrast stretch the FISH channels
-    min_intensity, max_intensity = np.inf, -np.inf
-    for ch in image.ch_dict["fish"]:
-        min_intensity = min(min_intensity, image.data[ch].min())
-        max_intensity = max(max_intensity, image.data[ch].max())
-    for ch in image.ch_dict["fish"]:
-        image.data[ch] = contrast_stretch(
-            image.data[ch],
-            ch_id=image.ch_dict[ch],
-            in_range=(min_intensity, max_intensity),
-        )
+    if "fish" in image.ch_dict and not no_fish:
+        min_intensity, max_intensity = np.inf, -np.inf
+        for ch in image.ch_dict["fish"]:
+            min_intensity = min(min_intensity, image.data[ch].min())
+            max_intensity = max(max_intensity, image.data[ch].max())
+        for ch in image.ch_dict["fish"]:
+            image.data[ch] = contrast_stretch(
+                image.data[ch],
+                ch_id=image.ch_dict[ch],
+                in_range=(min_intensity, max_intensity),
+            )
+
     if visualize:
         # Show pre-processed data
         viewer.add_image(
             image.data,
-            channel_axis=0 if image.channels_no > 1 else None,
-            name=[n + "-pre" for (c, n) in image.ch_dict.items() if isinstance(c, int)]
-            if image.channels_no > 1
-            else image.ch_dict[image.ch_dict["Nuclei"]] + "-pre",
-            colormap=image.ch_dict["colormaps"]
-            if image.channels_no > 1
-            else image.ch_dict["colormaps"][image.ch_dict["Nuclei"]],
+            channel_axis=0,
+            name=[n + "-pre" for (c, n) in image.ch_dict.items() if isinstance(c, int)],
+            colormap=image.ch_dict["colormaps"],
             blending="additive",
             scale=image.scaling,
             depiction="volume",
@@ -222,7 +219,7 @@ def analyze_image(
             visible=False,
         )
 
-    if cytoplasm_ch is not None:
+    if "Cytoplasm" in image.ch_dict:
         # Apply median filter to denoise the cytoplasm channel
         print("Denoising cytoplasm's channel:")
         cytoplasm_den = filter(

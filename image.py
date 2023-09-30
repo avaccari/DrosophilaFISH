@@ -64,6 +64,10 @@ class Image:
             except Exception:
                 raise ValueError("The file is not a valid .npy file.")
 
+        # Check the number of channels and if only 1, make it 4D
+        if len(self.data.shape) == 3:
+            self.data = np.expand_dims(self.data, axis=0)
+
         contrast = [
             [np.min(self.data[ch]), np.max(self.data[ch])]
             for ch in range(self.data.shape[0])
@@ -190,6 +194,7 @@ class Image:
                 ch_dict["colormaps"] = ["green", "bop orange", "gray"]
         elif required_channels == 1:
             ch_dict["Nuclei"] = 0
+            ch_dict["others"] = [0]
             ch_dict[0] = "Nuclei"
             ch_dict["colormaps"] = ["green"]
         else:

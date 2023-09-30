@@ -85,13 +85,13 @@
       "args": ["--visualize"]
     },
     {
-      "name": "Python: main.py (--nuclei_ch1)",
+      "name": "Python: main.py (--nuclei_ch 1)",
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--nuclei_ch1"]
+      "args": ["--nuclei_ch", "1"]
     },
     {
       "name": "Python: main.py (--metadata_only)",
@@ -103,13 +103,13 @@
       "args": ["--metadata_only"]
     },
     {
-      "name": "Python: main.py (--visualize --nuclei_ch1)",
+      "name": "Python: main.py (--visualize --nuclei_ch 1)",
       "type": "python",
       "request": "launch",
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--visualize", "--nuclei_ch1"]
+      "args": ["--visualize", "--nuclei_ch", "1"]
     },
     {
       "name": "Python: main.py (--channels 3)",
@@ -137,25 +137,6 @@
       "console": "integratedTerminal",
       "justMyCode": true,
       "args": ["--visualize", "--channels", "3", "--no_cyto"]
-    },
-
-    {
-      "name": "Python: main-run-KEEP.py (--visualize )",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/main-run-KEEP.py",
-      "console": "integratedTerminal",
-      "justMyCode": true,
-      "args": ["--visualize"]
-    },
-    {
-      "name": "Python: main-run-KEEP.py (--visualize --channels 3)",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/main-run-KEEP.py",
-      "console": "integratedTerminal",
-      "justMyCode": true,
-      "args": ["--visualize", "--channels", "3"]
     },
     {
       "name": "Python: main.py (--metadata_only --resolution 2.0 0.208 0.208)",
