@@ -40,6 +40,30 @@
       "args": ["--regenerate_nuclei"]
     },
     {
+      "name": "Python: main.py (--regenerate_nuclei --output_dir /tmp)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": ["--regenerate_nuclei", "--output_dir", "/tmp"]
+    },
+    {
+      "name": "Python: main.py (--visualize --regenerate_nuclei --no_fish --output_dir /tmp)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--visualize",
+        "--regenerate_nuclei",
+        "--no_fish",
+        "--output_dir",
+        "/tmp"
+      ]
+    },
+    {
       "name": "Python: main.py (--regenerate_fish)",
       "type": "python",
       "request": "launch",
@@ -55,7 +79,7 @@
       "program": "${workspaceFolder}/main.py",
       "console": "integratedTerminal",
       "justMyCode": true,
-      "args": ["--output_dir", "tmp"]
+      "args": ["--output_dir", "/tmp"]
     },
     {
       "name": "Python: main.py (--visualize --output_dir /tmp)",

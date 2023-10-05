@@ -1,5 +1,3 @@
-from abc import ABC, abstractmethod
-
 # import matplotlib.pyplot as plt
 import numpy as np
 import skimage.measure as ski_mea
@@ -9,32 +7,65 @@ from colorama import Fore, Style
 import os_utils
 
 
-class Segmentation(ABC):
+class NucleiSegmentation:
     def __init__(self, filename_root, ch_id, overwrite=False, out_dir=None):
         self.filename_root = filename_root
         self.ch_id = ch_id
         self.overwrite = overwrite
         self.out_dir = out_dir
 
-    @abstractmethod
-    def _cost(self, threshold, temp_region, temp_values):
-        pass
+    def _cost(self, t, temp_region, temp_values, temp_cytoplasm=None):
+        # Threshold within the Voronoi cell
+        msk = np.zeros_like(temp_region, dtype="bool")
+        msk[temp_region] = temp_values[temp_region] >= t
+        # if temp_cytoplasm is not None:
+        #     msk_cyto = np.zeros_like(temp_region, dtype="bool")
+        #     msk_cyto[temp_region] = temp_cytoplasm[temp_region] >= t
 
-    def _evaluate_variance_in_volume(self, indexes, values):
+        # Outside of thresholded area within the Voronoi cell
+        out_idx = np.logical_and(~msk, temp_region)
+        out_variance = self._evaluate_variance_in_volume(out_idx, temp_values)
+
+        # Inside of thresholded area within the Voronoi cell
+        in_idx = np.logical_and(msk, temp_region)
+        in_variance = self._evaluate_variance_in_volume(in_idx, temp_values)
+
+        # surface_idx = np.logical_xor(
+        #     ski_mor.binary_dilation(msk, footprint=ski_mor.ball(1)), msk
+        # )
+        # surface = surface_idx.sum()
+
+        # volume = in_idx.sum()
+        # volume_val = temp_values[in_idx].sum()
+
+        table = ski_mea.regionprops(ski_mea.label(msk))
+        objects = len(table)
+
+        return (
+            out_variance + in_variance + 0 if (objects == 1) else np.inf,
+            objects,
+        )
+
+    def _evaluate_variance_in_volume(self, indexes, values, normalize=False):
         volume = indexes.sum()
         intensities = values[indexes]
         intensities_sum = intensities.sum()
         intensities_avg = 0 if volume == 0 else intensities_sum / volume
-        intensities_stdev = np.square(intensities - intensities_avg)
+        intensities_var = np.square(intensities - intensities_avg)
+        variance = intensities_var.sum()
+        if normalize:
+            variance /= volume if volume > 0 else 0
 
-        return intensities_stdev.sum()
+        return variance
 
-    def _find_min_threshold(self, start, temp_region, temp_values):
+    def _find_min_threshold(self, start, temp_region, temp_values, temp_cytoplasm=None):
         # costs = []  #! Debug
         min_cost = np.inf
         threshold_min = 0
         for threshold in range(start, 256):
-            cost, objects = self._cost(threshold, temp_region, temp_values)
+            cost, objects = self._cost(
+                threshold, temp_region, temp_values, temp_cytoplasm
+            )
             # Assumption: we are increasing the threshold so, if we have no
             # objects at a certain threshold, we will never have objects at
             # higher thresholds.
@@ -52,7 +83,7 @@ class Segmentation(ABC):
         # plt.scatter(range(start, start + len(costs)), costs, s=1)  #! Debug
         return threshold_min
 
-    def _temp_masks(self, values, current_region):
+    def _find_region_limits(self, current_region):
         # Find extension of the region of interest within the whole volume
         z = np.any(current_region, axis=(1, 2))
         y = np.any(current_region, axis=(0, 2))
@@ -66,11 +97,6 @@ class Segmentation(ABC):
         y_max += 1
         x_max += 1
 
-        # Create temporary masks for the smallest volume that includes the
-        # 'region of interest
-        temp_region = current_region[z_min:z_max, y_min:y_max, x_min:x_max]
-        temp_values = values[z_min:z_max, y_min:y_max, x_min:x_max]
-
         return (
             z_min,
             z_max,
@@ -78,8 +104,6 @@ class Segmentation(ABC):
             y_max,
             x_min,
             x_max,
-            temp_region,
-            temp_values,
         )
 
     def _get_centers_in_region(self, centers, z_min, z_max, y_min, y_max, x_min, x_max):
@@ -108,7 +132,7 @@ class Segmentation(ABC):
             or temp_mask_open[:, :, -1].any()
         )
 
-    def _mask_ok(
+    def _check_mask(
         self, temp_mask_open, centers, z_min, z_max, y_min, y_max, x_min, x_max
     ):
         # Get the centers inside the region of interest
@@ -128,7 +152,7 @@ class Segmentation(ABC):
             return False, "region touches border"
         return True, "good"
 
-    def _segment(self, regions, values, centers):
+    def _segment(self, regions, values, centers, cytoplasm=None):
         # plt.figure()  #! Debug
         labels = np.zeros_like(regions)
         start = 1
@@ -137,7 +161,7 @@ class Segmentation(ABC):
             # Create a mask that isolates just the region of interest (ones)
             # everything else is zero.
             current_region = regions == lbl
-            # Find the smallest volumes that include the region of interest
+            # Find the limits of the smallest volumes that include the region of interest
             (
                 z_min,
                 z_max,
@@ -145,15 +169,27 @@ class Segmentation(ABC):
                 y_max,
                 x_min,
                 x_max,
-                temp_region,
-                temp_values,
-            ) = self._temp_masks(values, current_region)
-            threshold_min = self._find_min_threshold(start, temp_region, temp_values)
+            ) = self._find_region_limits(current_region)
+
+            # Create temporary masks for the smallest volume that includes
+            # the region of interest
+            temp_region = current_region[z_min:z_max, y_min:y_max, x_min:x_max]
+            temp_values = values[z_min:z_max, y_min:y_max, x_min:x_max]
+            temp_cytoplasm = None
+            if cytoplasm is not None:
+                temp_cytoplasm = cytoplasm[z_min:z_max, y_min:y_max, x_min:x_max]
+
+            # Optimize the threshold to identify the nucleus within the region
+            threshold_min = self._find_min_threshold(
+                start, temp_region, temp_values, temp_cytoplasm
+            )
+
+            # Create a mask that isolates the nucleus within the region of interest
             temp_mask = np.zeros_like(temp_region, dtype="bool")
             temp_mask[temp_region] = temp_values[temp_region] >= threshold_min
 
+            # Open the mask. If this results in more than one component, keep the largest
             temp_mask_open = ski_mor.opening(temp_mask, footprint=ski_mor.ball(5)[2::3])
-            # If the opening creates more than one connected component, keep the largest
             temp_mask_open_labels = ski_mea.label(temp_mask_open)
             components = ski_mea.regionprops(temp_mask_open_labels)
             if len(components) > 1:
@@ -163,7 +199,7 @@ class Segmentation(ABC):
                         temp_mask_open[temp_mask_open_labels == c.label] = 0
 
             # Verify that the mask can be added to the labels
-            result, reason = self._mask_ok(
+            result, reason = self._check_mask(
                 temp_mask_open, centers, z_min, z_max, y_min, y_max, x_min, x_max
             )
             if result:
@@ -176,7 +212,7 @@ class Segmentation(ABC):
         # plt.show()  #! Debug
         return labels
 
-    def segment(self, labels, values, centers, write_to_tiff=False):
+    def segment(self, labels, values, centers, cytoplasm=None, write_to_tiff=False):
         # plt.ion()  #! Debug
         print(f"Segmenting {self.ch_id}")
         labels = os_utils.store_to_npy(
@@ -188,6 +224,7 @@ class Segmentation(ABC):
                 "regions": labels,
                 "values": values,
                 "centers": centers,
+                "cytoplasm": cytoplasm,
             },
             overwrite=self.overwrite,
             out_dir=self.out_dir,
@@ -203,45 +240,3 @@ class Segmentation(ABC):
             )
         print("done!")
         return labels
-
-
-class NucleiSegmentation(Segmentation):
-    def __init__(self, filename_root, ch_id, overwrite=False, out_dir=None):
-        super().__init__(filename_root, ch_id, overwrite=overwrite, out_dir=out_dir)
-
-    def _cost(self, t, temp_region, temp_values):
-        msk = np.zeros_like(temp_region, dtype="bool")
-        msk[temp_region] = temp_values[temp_region] >= t
-
-        out_idx = np.logical_and(~msk, temp_region)
-        out_variance = self._evaluate_variance_in_volume(out_idx, temp_values)
-
-        in_idx = np.logical_and(msk, temp_region)
-        in_variance = self._evaluate_variance_in_volume(in_idx, temp_values)
-
-        # surface_idx = np.logical_xor(
-        #     ski_mor.binary_dilation(msk, footprint=ski_mor.ball(1)), msk
-        # )
-        # surface = surface_idx.sum()
-
-        # volume = in_idx.sum()
-        # volume_val = temp_values[in_idx].sum()
-
-        table = ski_mea.regionprops(ski_mea.label(msk))
-        objects = len(table)
-
-        return (
-            # out_mean_var + in_mean_var - surface + (0 if (objects == 1) else np.inf),
-            out_variance + in_variance + (0 if (objects == 1) else np.inf),
-            objects,
-        )
-
-
-class CytoplasmSegmentation(Segmentation):
-    def __init__(self, filename_root, ch_id):
-        super().__init__(filename_root, ch_id)
-
-    def _cost(self, t, temp_mask, temp_region, temp_values):
-        # Note: the cost should include the fact that the corresponding nucleus
-        # should be fully contained in the cytoplasm.
-        pass

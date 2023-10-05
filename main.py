@@ -95,11 +95,11 @@ def analyze_image(
         f"{Style.BRIGHT}{Fore.BLUE}#########################################{Style.RESET_ALL}"
     )
 
-    # --- Development only: crop data ---
-    dds = [np.floor(d // 4).astype("uint16") for d in image.data.shape]
-    dde = [np.ceil(d - d // 4).astype("uint16") for d in image.data.shape]
-    image.data = image.data[:, dds[1] : dde[1], dds[2] : dde[2], dds[3] : dde[3]]
-    # -------------------------------------
+    # # --- Development only: crop data ---
+    # dds = [np.floor(d // 4).astype("uint16") for d in image.data.shape]
+    # dde = [np.ceil(d - d // 4).astype("uint16") for d in image.data.shape]
+    # image.data = image.data[:, dds[1] : dde[1], dds[2] : dde[2], dds[3] : dde[3]]
+    # # -------------------------------------
 
     # Show original data
     if visualize:
@@ -341,6 +341,7 @@ def analyze_image(
         labels=nuclei_regions,
         values=nuclei_den,
         centers=nuclei_centers[:, :3],
+        cytoplasm=cytoplasm_den if "Cytoplasm" in image.ch_dict else None,
         write_to_tiff=True,
     )
     if visualize:
