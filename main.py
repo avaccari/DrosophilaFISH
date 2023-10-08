@@ -26,6 +26,7 @@ def analyze_image(
     filename=None,
     resolution=None,
     visualize=False,
+    visualize_only=False,
     channels=4,
     metadata_only=False,
     no_fish=False,
@@ -62,6 +63,7 @@ def analyze_image(
 
     # Stop if we only want the metadata
     if metadata_only:
+        print(f"{Fore.RED}{Style.BRIGHT}--- Analysis finished ---{Style.RESET_ALL}\n\n")
         return
 
     print(
@@ -102,7 +104,7 @@ def analyze_image(
     # # -------------------------------------
 
     # Show original data
-    if visualize:
+    if visualize or visualize_only:
         # Show pre-processed data
         viewer = napari.Viewer(title=osp.split(filename)[1], ndisplay=3)
         viewer.add_image(
@@ -118,6 +120,11 @@ def analyze_image(
             interpolation="nearest",
             visible=False,
         )
+
+    if visualize_only:
+        print(f"{Fore.RED}{Style.BRIGHT}--- Analysis finished ---{Style.RESET_ALL}\n\n")
+        napari.run()
+        return
 
     # Start pre-processing #######################################################
 
@@ -673,6 +680,12 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
+        "--visualize_only",
+        help="Only display the image using napari. Implies '--visualize'. (Default: False)",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
         "--nuclei_sigma_range",
         help="Range min max steps to use as LOG sigmas for the nuclei detection. (Default: 15 25 3. Pass as 3 space-separated values).",
         nargs=3,
@@ -731,7 +744,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.visualize:
+    if args.visualize or args.visualize_only:
         import napari
         from magicgui import magicgui
 
@@ -741,6 +754,7 @@ if __name__ == "__main__":
         args.file,
         resolution=args.resolution,
         visualize=args.visualize,
+        visualize_only=args.visualize_only,
         channels=args.channels,
         metadata_only=args.metadata_only,
         fish_contrast_range=args.fish_contrast_range,
