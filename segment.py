@@ -24,11 +24,15 @@ class NucleiSegmentation:
 
         # Outside of thresholded area within the Voronoi cell
         out_idx = np.logical_and(~msk, temp_region)
-        out_variance = self._evaluate_variance_in_volume(out_idx, temp_values)
+        out_variance = self._evaluate_variance_in_volume(
+            out_idx, temp_values, normalize=False
+        )
 
         # Inside of thresholded area within the Voronoi cell
         in_idx = np.logical_and(msk, temp_region)
-        in_variance = self._evaluate_variance_in_volume(in_idx, temp_values)
+        in_variance = self._evaluate_variance_in_volume(
+            in_idx, temp_values, normalize=False
+        )
 
         # surface_idx = np.logical_xor(
         #     ski_mor.binary_dilation(msk, footprint=ski_mor.ball(1)), msk
@@ -54,7 +58,7 @@ class NucleiSegmentation:
         intensities_var = np.square(intensities - intensities_avg)
         variance = intensities_var.sum()
         if normalize:
-            variance /= volume if volume > 0 else 0
+            variance = (variance / volume) if volume > 0 else 0
 
         return variance
 
