@@ -450,7 +450,8 @@ def analyze_image(
     nuclei_props_df.to_csv(path + ".csv")
 
     # FISH detection ##############################################################
-    if no_fish:
+
+    if no_fish or "fish" not in image.ch_dict:
         print(f"{Fore.RED}{Style.BRIGHT}--- Analysis finished ---{Style.RESET_ALL}\n\n")
         if visualize:
             napari.run()
@@ -643,6 +644,24 @@ if __name__ == "__main__":
         default=None,
     )
     parser.add_argument(
+        "--metadata_only",
+        help="Only retrieve and display the metadata of the CZI file. (Default: False)",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--visualize",
+        help="Display analysis results using napari. (Default: False)",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--visualize_only",
+        help="Only display the image using napari. Implies '--visualize'. (Default: False)",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
         "--resolution",
         help="Override the z y x resolution for the voxels. If not specified the values will be extracted from the image, if available. If not it will default to 1 1 1. (Pass as 3 space-separated values).",
         nargs=3,
@@ -666,24 +685,6 @@ if __name__ == "__main__":
         help="Specifies the channel number where the cytoplasm is imaged. Use `None` if the cytoplasm is not imaged. (Default: 3)",
         type=int,
         default=3,
-    )
-    parser.add_argument(
-        "--metadata_only",
-        help="Only retrieve and display the metadata of the CZI file. (Default: False)",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--visualize",
-        help="Display analysis results using napari. (Default: False)",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--visualize_only",
-        help="Only display the image using napari. Implies '--visualize'. (Default: False)",
-        default=False,
-        action="store_true",
     )
     parser.add_argument(
         "--nuclei_sigma_range",
