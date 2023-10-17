@@ -30,13 +30,14 @@ class Image:
         self._logger = self._setup_logger(__name__)
         self._get_metadata()
         self._show_metadata()
-        if required_channels != self.channels_no:
-            raise ValueError(
-                f"Number of required channels ({required_channels}) does not match the number of channels in the image ({self.channels_no})."
-            )
-        self.ch_dict = self._get_ch_dict(required_channels, nuclei_ch, cytoplasm_ch)
 
         if not metadata_only:
+            if required_channels != self.channels_no:
+                raise ValueError(
+                    f"Number of required channels ({required_channels}) does not match the number of channels in the image ({self.channels_no})."
+                )
+            self.ch_dict = self._get_ch_dict(required_channels, nuclei_ch, cytoplasm_ch)
+
             self.load_image()
 
     def _setup_logger(self, name):
