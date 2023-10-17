@@ -687,24 +687,6 @@ if __name__ == "__main__":
         default=3,
     )
     parser.add_argument(
-        "--metadata_only",
-        help="Only retrieve and display the metadata of the CZI file. (Default: False)",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--visualize",
-        help="Run the analysis and display the results using napari. (Default: False)",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
-        "--visualize_only",
-        help="Only display the original image using napari. Implies '--visualize'. (Default: False)",
-        default=False,
-        action="store_true",
-    )
-    parser.add_argument(
         "--nuclei_sigma_range",
         help="Range min max steps to use as LOG sigmas for the nuclei detection. (Default: 15 25 3. Pass as 3 space-separated values).",
         nargs=3,
