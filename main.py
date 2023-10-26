@@ -37,6 +37,7 @@ def analyze_image(
     regenerate_pre=False,
     regenerate_nuclei=False,
     regenerate_fish=False,
+    regenerate_all=False,
     nuclei_sigma_range=[15, 25, 3],
     nuclei_threshold=20,
     out_dir=None,
@@ -126,7 +127,14 @@ def analyze_image(
         napari.run()
         return
 
+    # Check if we are regenerating all
+    if regenerate_all:
+        regenerate_pre = True
+        regenerate_nuclei = True
+        regenerate_fish = True
+
     # Start pre-processing #######################################################
+    # TODO: save all pre-processed data
 
     # Contrast stretch nuclei and cytoplasm
     for ch in image.ch_dict["others"]:
@@ -465,7 +473,7 @@ def analyze_image(
     # well as within the channels. Contrast stretching individual nuclei
     # area would be equivalent to use non uniform detection thresholds.
 
-    # Extract the subset of values from teh FISH channels within the identifies
+    # Extract the subset of values from the FISH channels within the identifies
     # nuclei bounding boxes and calculate extremes
     sub = image.data[image.ch_dict["fish"]][
         np.stack([nuclei_labels_mask] * len(image.ch_dict["fish"]))
@@ -495,7 +503,7 @@ def analyze_image(
             )
 
     # Remove floor from FISH channels
-    # Using a kernel about 3 times the size of the puncta
+    # Using a kernel about 5 times the size of the puncta
     for ch in image.ch_dict["fish"]:
         fish_to_analyze[ch] = remove_floor(
             fish_to_analyze[ch],
@@ -739,6 +747,12 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
+        "--regenerate_all",
+        help="Regenerate all steps of the analysis. Equivalent to --regenerate_pre --regenerate_nuclei --regenerate_fish. (Default: False)",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
         "--output_dir",
         help="Directory where to look for and store the folder containing results and auxiliary files. (Default: the same directory as the input file)",
     )
@@ -766,6 +780,7 @@ if __name__ == "__main__":
         regenerate_pre=args.regenerate_pre,
         regenerate_nuclei=args.regenerate_nuclei,
         regenerate_fish=args.regenerate_fish,
+        regenerate_all=args.regenerate_all,
         nuclei_sigma_range=args.nuclei_sigma_range,
         nuclei_threshold=args.nuclei_threshold,
         out_dir=args.output_dir,
