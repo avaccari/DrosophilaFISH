@@ -1,4 +1,4 @@
-import matplotlib.pyplot as plt  #! debug
+import matplotlib.pyplot as plt
 import numpy as np
 import skimage.measure as ski_mea
 import skimage.morphology as ski_mor
@@ -140,7 +140,7 @@ class NucleiSegmentation:
             # "volume": volume,
             # "volume_val": volume_val,
             # "objects": objects,
-            "cost": cost,
+            "total_cost": cost,
         }
         return (
             cost,
