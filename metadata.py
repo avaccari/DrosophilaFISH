@@ -5,9 +5,9 @@ from os_utils import build_path
 
 
 class Metadata:
-    def __init__(self, filename_root, suf="-meta.json"):
-        self.root_dir = build_path(filename_root)
-        self.file = build_path(filename_root, suf)
+    def __init__(self, filename_root, suf="-meta.json", out_dir=None):
+        self.root_dir = build_path(filename_root, out_dir=out_dir)
+        self.file = build_path(filename_root, suf, out_dir=out_dir)
 
     def load_metadata(self, sec_data=None):
         try:

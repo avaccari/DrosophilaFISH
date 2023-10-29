@@ -5,20 +5,30 @@ import lzma
 import tifffile
 
 
-def build_path(filename_root, suffix=None):
+class OsUtils:
+    def __init__(self, filename_root=None, out_dir=None, overwrite=False):
+        self.filename_root = filename_root
+        self.out_dir = out_dir
+        self.overwrite = overwrite
+
+
+def build_path(filename_root, suffix=None, out_dir=None):
     dir, file = os.path.split(filename_root)
     file_name, _ = os.path.splitext(file)
-    root_dir = os.path.join(dir, file_name)
+    if out_dir:
+        root_dir = os.path.join(out_dir, file_name)
+    else:
+        root_dir = os.path.join(dir, file_name)
     return root_dir if suffix is None else os.path.join(root_dir, file_name + suffix)
 
 
-def save(file, array):
+def save_to_lzma(file, array):
     print("saving data... ", end="", flush=True)
     with lzma.open(f"{file}.lzma", "wb") as f:
         np.save(f, array)
 
 
-def load(file):
+def load_from_lzma(file):
     if not os.path.exists(f"{file}.lzma"):
         raise FileNotFoundError
 
@@ -27,33 +37,44 @@ def load(file):
         return np.load(f)
 
 
-def store_output(function, filename_root=None, ch_id=None, suffix="", args=None):
-    if args is None:
-        args = {}
+def check_lzma(file):
+    return os.path.exists(f"{file}.lzma")
+
+
+def store_to_npy(
+    function,
+    filename_root=None,
+    ch_id=None,
+    suffix="",
+    func_args=None,
+    overwrite=False,
+    out_dir=None,
+):
+    if func_args is None:
+        func_args = {}
     if filename_root is None:
-        output = function(**args)
+        output = function(**func_args)
     elif ch_id is None:
         raise ValueError(
             "A ch_id should be provided to identify the channel. Segmentation was not evaluated."
         )
     else:
-        file = build_path(filename_root, f"-{ch_id}-{suffix}.npy")
-        try:
-            output = load(file)
-        except (FileNotFoundError, ValueError):
-            output = function(**args)
+        file = build_path(filename_root, f"-{ch_id}-{suffix}.npy", out_dir=out_dir)
+        if check_lzma(file) and not overwrite:
+            output = load_from_lzma(file)
+        else:
+            output = function(**func_args)
             try:
-                root_dir = build_path(filename_root)
+                root_dir = build_path(filename_root, out_dir=out_dir)
                 if not os.path.isdir(root_dir):
                     os.makedirs(root_dir)
-                save(file, output)
+                save_to_lzma(file, output)
             except Exception:
                 print("WARNING: error saving the file.")
-    print("done!")
     return output
 
 
-def write_to_tif(array, filename_root=None, ch_id=None, suffix=""):
+def write_to_tif(array, filename_root=None, ch_id=None, suffix="", out_dir=None):
     if ch_id is None:
         raise ValueError(
             "A ch_id should be provided to identify the channel. Image is not written."
@@ -64,9 +85,9 @@ def write_to_tif(array, filename_root=None, ch_id=None, suffix=""):
         )
     else:
         print(f"Writing {ch_id} as image...", end="", flush=True)
-        file = build_path(filename_root, f"-{ch_id}-{suffix}.tif")
+        file = build_path(filename_root, f"-{ch_id}-{suffix}.tif", out_dir=out_dir)
         try:
-            root_dir = build_path(filename_root)
+            root_dir = build_path(filename_root, out_dir=out_dir)
             if not os.path.isdir(root_dir):
                 os.makedirs(root_dir)
             tifffile.imwrite(

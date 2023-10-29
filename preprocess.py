@@ -37,6 +37,8 @@ def filter(
     cval=0,
     filename_root=None,
     ch_id=None,
+    overwrite=False,
+    out_dir=None,
 ):
     filtered = data.copy()
 
@@ -69,12 +71,14 @@ def filter(
         flush=True,
     )
 
-    filtered = os_utils.store_output(
+    filtered = os_utils.store_to_npy(
         fun,
         filename_root=filename_root,
         ch_id=ch_id,
         suffix=suffix,
-        args=args,
+        func_args=args,
+        overwrite=overwrite,
+        out_dir=out_dir,
     )
 
     print("done!")
@@ -82,11 +86,25 @@ def filter(
     return filtered
 
 
-def remove_floor(data, sigma=(20, 100, 100), filename_root=None, ch_id=None, mask=None):
+def remove_floor(
+    data,
+    sigma=(20, 100, 100),
+    filename_root=None,
+    ch_id=None,
+    mask=None,
+    overwrite=False,
+    out_dir=None,
+):
     print(f"Removing floor from {Fore.GREEN}{Style.BRIGHT}{ch_id}{Style.RESET_ALL}:")
     input_min, input_median, input_max = eval_stats(data, mask=mask)
     noise_floor = filter(
-        data, type="gaussian", sigma=sigma, filename_root=filename_root, ch_id=ch_id
+        data,
+        type="gaussian",
+        sigma=sigma,
+        filename_root=filename_root,
+        ch_id=ch_id,
+        overwrite=overwrite,
+        out_dir=out_dir,
     )
     defloored = data.astype("int16") - noise_floor.astype("int16")
     defloored = np.maximum(defloored, 0).astype("uint8")
