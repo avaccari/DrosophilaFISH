@@ -41,7 +41,16 @@ def analyze_image(
     nuclei_sigma_range=[15, 25, 3],
     nuclei_threshold=20,
     out_dir=None,
+    show_version=False,
 ):
+    # Set version
+    VERSION = "v1.1.0"
+
+    # If we are just showing the version
+    if show_version:
+        print(f"Version: {VERSION}")
+        return
+
     # Ask user to choose a file
     print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}")
     if filename is None:
@@ -756,6 +765,12 @@ if __name__ == "__main__":
         "--output_dir",
         help="Directory where to look for and store the folder containing results and auxiliary files. (Default: the same directory as the input file)",
     )
+    parser.add_argument(
+        "--version",
+        help="Show version number and exit.",
+        default=False,
+        action="store_true",
+    )
 
     args = parser.parse_args()
 
@@ -784,4 +799,5 @@ if __name__ == "__main__":
         nuclei_sigma_range=args.nuclei_sigma_range,
         nuclei_threshold=args.nuclei_threshold,
         out_dir=args.output_dir,
+        show_version=args.version,
     )
