@@ -89,6 +89,10 @@ class Image:
             [(k, v) for k, v in self.ch_dict.items() if isinstance(k, int)], contrast
         ):
             print(f"  {c}: {n:9} => {r}")
+        print(f"{Style.BRIGHT}Fish channels:{Style.RESET_ALL}")
+        print(f"  {self.ch_dict['fish']}")
+        print(f"{Style.BRIGHT}Other channels:{Style.RESET_ALL}")
+        print(f"  {self.ch_dict['others']}")
         print(
             f"{Style.BRIGHT}{Fore.BLUE}#########################################{Style.RESET_ALL}"
         )
