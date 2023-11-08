@@ -32,8 +32,10 @@ def analyze_image(
     no_fish=False,
     fish_contrast_range=None,
     fish_threshold_range=[2, 10.5, 0.5],
-    cytoplasm_ch=3,
     nuclei_ch=0,
+    nuclei_wavelength=None,
+    cytoplasm_ch=3,
+    cytoplasm_wavelength=None,
     regenerate_pre=False,
     regenerate_nuclei=False,
     regenerate_fish=False,
@@ -68,7 +70,9 @@ def analyze_image(
         metadata_only=metadata_only,
         required_channels=channels,
         nuclei_ch=nuclei_ch,
+        nuclei_wavelength=nuclei_wavelength,
         cytoplasm_ch=cytoplasm_ch,
+        cytoplasm_wavelength=cytoplasm_wavelength,
     )
 
     # Stop if we only want the metadata
@@ -123,7 +127,7 @@ def analyze_image(
             name=[
                 n + "-orig" for (c, n) in image.ch_dict.items() if isinstance(c, int)
             ],
-            colormap=image.ch_dict["colormaps"],
+            colormap=image.ch_dict["colormaps"].values(),
             blending="additive",
             scale=image.scaling,
             depiction="volume",
@@ -214,7 +218,7 @@ def analyze_image(
             image.data,
             channel_axis=0,
             name=[n + "-pre" for (c, n) in image.ch_dict.items() if isinstance(c, int)],
-            colormap=image.ch_dict["colormaps"],
+            colormap=image.ch_dict["colormaps"].values(),
             blending="additive",
             scale=image.scaling,
             depiction="volume",
@@ -236,7 +240,7 @@ def analyze_image(
         viewer.add_image(
             nuclei_den,
             name=image.ch_dict[image.ch_dict["Nuclei"]] + "-den",
-            colormap="green",
+            colormap=image.ch_dict["colormaps"][image.ch_dict["Nuclei"]],
             blending="additive",
             scale=image.scaling,
             interpolation="nearest",
@@ -258,7 +262,7 @@ def analyze_image(
             viewer.add_image(
                 cytoplasm_den,
                 name=image.ch_dict[image.ch_dict["Cytoplasm"]] + "-den",
-                colormap="gray",
+                colormap=image.ch_dict["colormaps"][image.ch_dict["Cytoplasm"]],
                 blending="additive",
                 scale=image.scaling,
                 interpolation="nearest",
@@ -674,7 +678,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--visualize_only",
-        help="Only display the image using napari. Implies '--visualize'. (Default: False)",
+        help="Only display the original data using napari. Implies '--visualize'. (Default: False)",
         default=False,
         action="store_true",
     )
@@ -691,17 +695,39 @@ if __name__ == "__main__":
         type=int,
         default=4,
     )
-    parser.add_argument(
+    nuclei_sel_group = parser.add_argument_group(
+        "Nuclei channel selection",
+        "If not None, --nuclei_wavelength takes precedence over --nuclei_ch.",
+    )
+    nuclei_sel = nuclei_sel_group.add_mutually_exclusive_group()
+    nuclei_sel.add_argument(
         "--nuclei_ch",
         help="Specifies the channel number where the nuclei are imaged. (Default: 0)",
         type=int,
         default=0,
     )
-    parser.add_argument(
+    nuclei_sel.add_argument(
+        "--nuclei_wavelength",
+        help="Specifies the wavelength of the channel where the nuclei are imaged. (Default: None)",
+        type=int,
+        default=None,
+    )
+    cytoplasm_sel_group = parser.add_argument_group(
+        "Cytoplasm channel selection",
+        "If not None, --cytoplasm_wavelength takes precedence over --cytoplasm_ch.",
+    )
+    cytoplasm_sel = cytoplasm_sel_group.add_mutually_exclusive_group()
+    cytoplasm_sel.add_argument(
         "--cytoplasm_ch",
         help="Specifies the channel number where the cytoplasm is imaged. Use `None` if the cytoplasm is not imaged. (Default: 3)",
         type=int,
         default=3,
+    )
+    cytoplasm_sel.add_argument(
+        "--cytoplasm_wavelength",
+        help="Specifies the wavelength of the channel where the cytoplasm is imaged. (Default: None)",
+        type=int,
+        default=None,
     )
     parser.add_argument(
         "--nuclei_sigma_range",
@@ -789,8 +815,10 @@ if __name__ == "__main__":
         metadata_only=args.metadata_only,
         fish_contrast_range=args.fish_contrast_range,
         fish_threshold_range=args.fish_threshold_range,
-        cytoplasm_ch=args.cytoplasm_ch,
         nuclei_ch=args.nuclei_ch,
+        nuclei_wavelength=args.nuclei_wavelength,
+        cytoplasm_ch=args.cytoplasm_ch,
+        cytoplasm_wavelength=args.cytoplasm_wavelength,
         no_fish=args.no_fish,
         regenerate_pre=args.regenerate_pre,
         regenerate_nuclei=args.regenerate_nuclei,

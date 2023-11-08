@@ -15,7 +15,9 @@ class Image:
         metadata_only=False,
         required_channels=None,
         nuclei_ch=0,
+        nuclei_wavelength=None,
         cytoplasm_ch=3,
+        cytoplasm_wavelength=None,
     ):
         self.filename = filename
         self.resolution = resolution
@@ -26,18 +28,24 @@ class Image:
         self.scale_ratio = None
         self.size = None
         self.type_meta = None
+        self.channels_no = None
+        self.required_channels = required_channels
+        self.nuclei_ch = nuclei_ch
+        self.nuclei_wavelength = nuclei_wavelength
+        self.cytoplasm_ch = cytoplasm_ch
+        self.cytoplasm_wavelength = cytoplasm_wavelength
+        self.ch_dict = None
 
         self._logger = self._setup_logger(__name__)
         self._get_metadata()
         self._show_metadata()
 
         if not metadata_only:
-            if required_channels != self.channels_no:
+            if self.required_channels != self.channels_no:
                 raise ValueError(
-                    f"Number of required channels ({required_channels}) does not match the number of channels in the image ({self.channels_no})."
+                    f"Number of required channels ({self.required_channels}) does not match the number of channels in the image ({self.channels_no})."
                 )
-            self.ch_dict = self._get_ch_dict(required_channels, nuclei_ch, cytoplasm_ch)
-
+            self._get_ch_dict()
             self.load_image()
 
     def _setup_logger(self, name):
@@ -143,62 +151,64 @@ class Image:
             f"{Style.BRIGHT}{Fore.BLUE}#########################################{Style.RESET_ALL}"
         )
 
-    @staticmethod
-    def _get_ch_dict(required_channels, nuclei_ch, cytoplasm_ch):
-        ch_dict = {}
-        if required_channels == 4:
-            if cytoplasm_ch is None:
-                raise ValueError(
-                    f"Configuration of channels ({required_channels}) and cytoplasm_ch ({cytoplasm_ch}) not supported."
-                )
-            if nuclei_ch == 1:
-                ch_dict["Nuclei"] = 1
-                ch_dict["Cytoplasm"] = 3
-                ch_dict["others"] = [1, 3]
-                ch_dict["fish"] = [0, 2]
-                ch_dict[0] = "FISH_647"
-                ch_dict[1] = "Nuclei"
-                ch_dict[2] = "FISH_568"
-                ch_dict[3] = "Cytoplasm"
-                ch_dict["colormaps"] = ["bop blue", "green", "bop orange", "gray"]
-            else:
-                ch_dict["Nuclei"] = 0
-                ch_dict["Cytoplasm"] = 3
-                ch_dict["others"] = [0, 3]
-                ch_dict["fish"] = [1, 2]
-                ch_dict[0] = "Nuclei"
-                ch_dict[1] = "FISH_647"
-                ch_dict[2] = "FISH_568"
-                ch_dict[3] = "Cytoplasm"
-                ch_dict["colormaps"] = ["green", "bop blue", "bop orange", "gray"]
-        elif required_channels == 3:
-            if nuclei_ch == 1:
-                raise ValueError(
-                    f"Configuration of channels ({required_channels}) and nuclei_ch ({nuclei_ch}) not supported."
-                )
-            if cytoplasm_ch is None:
-                ch_dict["Nuclei"] = 0
-                ch_dict["others"] = [0]
-                ch_dict["fish"] = [1, 2]
-                ch_dict[0] = "Nuclei"
-                ch_dict[1] = "FISH_647"
-                ch_dict[2] = "FISH_568"
-                ch_dict["colormaps"] = ["green", "bop blue", "bop orange"]
-            else:
-                ch_dict["Nuclei"] = 0
-                ch_dict["Cytoplasm"] = 2
-                ch_dict["others"] = [0, 2]
-                ch_dict["fish"] = [1]
-                ch_dict[0] = "Nuclei"
-                ch_dict[1] = "FISH_568"
-                ch_dict[2] = "Cytoplasm"
-                ch_dict["colormaps"] = ["green", "bop orange", "gray"]
-        elif required_channels == 1:
-            ch_dict["Nuclei"] = 0
-            ch_dict["others"] = [0]
-            ch_dict[0] = "Nuclei"
-            ch_dict["colormaps"] = ["green"]
-        else:
-            raise ValueError(f"Number of channels ({required_channels}) not supported.")
+    def _find_channel(self, wavelength):
+        for ch, meta in self.channels_meta.items():
+            if int(float(meta["Wavelength"])) == wavelength:
+                return ch
+        return None
 
-        return ch_dict
+    def _get_ch_dict(self):
+        self.ch_dict = {}
+        if self.required_channels == 1:
+            self.ch_dict["Nuclei"] = 0
+            self.ch_dict["others"] = [0]
+            self.ch_dict[0] = "Nuclei"
+            self.ch_dict["colormaps"] = {0: "green"}
+        else:
+            nuclei_ch = self.nuclei_ch
+            if self.nuclei_wavelength is not None:
+                nuclei_ch = self._find_channel(self.nuclei_wavelength)
+                if nuclei_ch is None:
+                    raise ValueError(
+                        f"Channel with wavelength {self.nuclei_wavelength} not found."
+                    )
+            self.ch_dict["Nuclei"] = nuclei_ch
+            self.ch_dict[nuclei_ch] = "Nuclei"
+            self.ch_dict["colormaps"] = {0: "green"}
+
+            cytoplasm_ch = self.cytoplasm_ch
+            if self.cytoplasm_wavelength is not None:
+                cytoplasm_ch = self._find_channel(self.cytoplasm_wavelength)
+                if cytoplasm_ch is None:
+                    raise ValueError(
+                        f"Channel with wavelength {self.cytoplasm_wavelength} not found."
+                    )
+            if cytoplasm_ch is not None:
+                self.ch_dict["Cytoplasm"] = cytoplasm_ch
+                self.ch_dict[cytoplasm_ch] = "Cytoplasm"
+                self.ch_dict["colormaps"][cytoplasm_ch] = "gray"
+
+            self.ch_dict["others"] = [
+                ch
+                for ch in range(self.channels_no)
+                if ch not in [nuclei_ch, cytoplasm_ch]
+            ]
+
+            # Remaining channels are FISH
+            colors = [
+                "bop orange",
+                "bop blue",
+                "bop purple",
+            ]  # TODO: add more colors or make scalable with the number of channels
+            self.ch_dict["fish"] = [
+                ch
+                for ch in range(self.channels_no)
+                if ch not in [nuclei_ch, cytoplasm_ch]
+            ]
+
+            for ch in self.ch_dict["fish"]:
+                self.ch_dict[
+                    ch
+                ] = f"FISH_{int(float(self.channels_meta[ch]['Wavelength']))}"
+
+                self.ch_dict["colormaps"][ch] = colors.pop(0)
