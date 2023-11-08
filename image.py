@@ -175,6 +175,7 @@ class Image:
             self.ch_dict["Nuclei"] = nuclei_ch
             self.ch_dict[nuclei_ch] = "Nuclei"
             self.ch_dict["colormaps"] = {0: "green"}
+            self.ch_dict["others"] = [nuclei_ch]
 
             cytoplasm_ch = self.cytoplasm_ch
             if self.cytoplasm_wavelength is not None:
@@ -187,12 +188,7 @@ class Image:
                 self.ch_dict["Cytoplasm"] = cytoplasm_ch
                 self.ch_dict[cytoplasm_ch] = "Cytoplasm"
                 self.ch_dict["colormaps"][cytoplasm_ch] = "gray"
-
-            self.ch_dict["others"] = [
-                ch
-                for ch in range(self.channels_no)
-                if ch not in [nuclei_ch, cytoplasm_ch]
-            ]
+                self.ch_dict["others"].append(cytoplasm_ch)
 
             # Remaining channels are FISH
             colors = [
