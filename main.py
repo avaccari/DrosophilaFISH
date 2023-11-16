@@ -124,10 +124,8 @@ def analyze_image(
         viewer.add_image(
             image.data,
             channel_axis=0,
-            name=[
-                n + "-orig" for (c, n) in image.ch_dict.items() if isinstance(c, int)
-            ],
-            colormap=image.ch_dict["colormaps"].values(),
+            name=[image.ch_dict[n] + "-orig" for n in range(image.channels_no)],
+            colormap=[image.ch_dict["colormaps"][n] for n in range(image.channels_no)],
             blending="additive",
             scale=image.scaling,
             depiction="volume",
@@ -217,8 +215,8 @@ def analyze_image(
         viewer.add_image(
             image.data,
             channel_axis=0,
-            name=[n + "-pre" for (c, n) in image.ch_dict.items() if isinstance(c, int)],
-            colormap=image.ch_dict["colormaps"].values(),
+            name=[image.ch_dict[n] + "-pre" for n in range(image.channels_no)],
+            colormap=[image.ch_dict["colormaps"][n] for n in range(image.channels_no)],
             blending="additive",
             scale=image.scaling,
             depiction="volume",
