@@ -89,10 +89,12 @@ class Image:
             [(k, v) for k, v in self.ch_dict.items() if isinstance(k, int)], contrast
         ):
             print(f"  {c}: {n:9} => {r}")
-        print(f"{Style.BRIGHT}Fish channels:{Style.RESET_ALL}")
-        print(f"  {self.ch_dict['fish']}")
-        print(f"{Style.BRIGHT}Other channels:{Style.RESET_ALL}")
-        print(f"  {self.ch_dict['others']}")
+        if "fish" in self.ch_dict:
+            print(f"{Style.BRIGHT}Fish channels:{Style.RESET_ALL}")
+            print(f"  {self.ch_dict['fish']}")
+        if "others" in self.ch_dict:
+            print(f"{Style.BRIGHT}Other channels:{Style.RESET_ALL}")
+            print(f"  {self.ch_dict['others']}")
         print(
             f"{Style.BRIGHT}{Fore.BLUE}#########################################{Style.RESET_ALL}"
         )
@@ -163,13 +165,13 @@ class Image:
 
     def _get_ch_dict(self):
         self.ch_dict = {}
+        nuclei_ch = self.nuclei_ch
         if self.required_channels == 1:
             self.ch_dict["Nuclei"] = 0
             self.ch_dict["others"] = [0]
             self.ch_dict[0] = "Nuclei"
-            self.ch_dict["colormaps"] = {0: "green"}
+            self.ch_dict["colormaps"] = {nuclei_ch: "green"}
         else:
-            nuclei_ch = self.nuclei_ch
             if self.nuclei_wavelength is not None:
                 nuclei_ch = self._find_channel(self.nuclei_wavelength)
                 if nuclei_ch is None:
@@ -178,7 +180,7 @@ class Image:
                     )
             self.ch_dict["Nuclei"] = nuclei_ch
             self.ch_dict[nuclei_ch] = "Nuclei"
-            self.ch_dict["colormaps"] = {0: "green"}
+            self.ch_dict["colormaps"] = {nuclei_ch: "green"}
             self.ch_dict["others"] = [nuclei_ch]
 
             cytoplasm_ch = self.cytoplasm_ch
