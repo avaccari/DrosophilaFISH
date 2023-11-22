@@ -19,7 +19,7 @@ def _buffer_slices(slices, buffer, image_shape):
     return slices_list
 
 
-def _detections_at_thres(
+def _detections_at_threshold(
     fish_channel,
     nuclei_labels,
     nuclei_props_df,
@@ -29,7 +29,7 @@ def _detections_at_thres(
     MAX_PUNCTA_SIGMA = 3
     NUM_PUNCTA_SIGMA = 7
 
-    detections_at_thrs = {}
+    detections_at_threshold = {}
 
     for n_idx, n_row in nuclei_props_df[nuclei_props_df["keep"]].iterrows():
         lbl = n_row["label"]
@@ -43,7 +43,7 @@ def _detections_at_thres(
 
         # Find 647 blobs locations within the bbox, mask, and shift coordinates
         # TODO: consider using a range of sigmas and then Frangi to preserve the most blobby
-        ctrs = detect_blobs(
+        centers = detect_blobs(
             fish_channel[sl_buf[0], sl_buf[1], sl_buf[2]].astype("float64"),
             min_sigma=MIN_PUNCTA_SIGMA,
             max_sigma=MAX_PUNCTA_SIGMA,
@@ -54,7 +54,7 @@ def _detections_at_thres(
         ) + (sl_buf[0].start, sl_buf[1].start, sl_buf[2].start, 0, 0, 0)
 
         df = pd.DataFrame(
-            ctrs, columns=["Z", "Y", "X", "sigma_Z", "sigma_Y", "sigma_X"]
+            centers, columns=["Z", "Y", "X", "sigma_Z", "sigma_Y", "sigma_X"]
         )
 
         if not df.empty:
@@ -68,19 +68,19 @@ def _detections_at_thres(
             df = df[df["keep"]].drop(columns=["keep"])
 
             # If multiple nuclei regions with same label, concatenate detections
-            if lbl in detections_at_thrs:
-                df = pd.concat([detections_at_thrs[lbl], df], ignore_index=True)
+            if lbl in detections_at_threshold:
+                df = pd.concat([detections_at_threshold[lbl], df], ignore_index=True)
 
             # If the dataframe is not empty, assign the nucleus label
         if not df.empty:
             df.loc[:, "nucleus"] = lbl
-            detections_at_thrs[lbl] = df
+            detections_at_threshold[lbl] = df
 
         print(
             f"Detected {Fore.BLUE}{len(df):3d} puncta{Style.RESET_ALL}\033[3F",
         )
     print("\033[3E")
-    return detections_at_thrs
+    return detections_at_threshold
 
 
 def _get_fish_puncta(
@@ -99,7 +99,7 @@ def _get_fish_puncta(
         print(
             f"{Fore.GREEN}--- Ch: {ch_id} - Thrs: {thresh_min} => {threshold} => {thresh_max} ---{Style.RESET_ALL}"
         )
-        detections_at_thrs = _detections_at_thres(
+        detections_at_thrs = _detections_at_threshold(
             fish_channel,
             nuclei_labels,
             nuclei_props_df,
@@ -240,7 +240,7 @@ def get_fish_puncta(
                 #         )
                 props_df.to_json(file_props + ".json")
                 props_df.to_csv(file_props + ".csv")
-            except:
+            except Exception:
                 print("WARNING: error saving the file.")
 
     return fish_puncta_df, props_df
