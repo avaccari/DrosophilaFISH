@@ -219,6 +219,7 @@ class NucleiSegmentation:
 
     def _touch_edges(self, temp_mask_open):
         # Check that the region doesn't touch the border of the volume
+        # TODO: modify to check if it touches the border of the image, not the volume
         return (
             temp_mask_open[0, :, :].any()
             or temp_mask_open[-1, :, :].any()
@@ -244,12 +245,13 @@ class NucleiSegmentation:
             return False, "center out of region"
         if check.sum() > 1:  # More than one center inside the region of interest
             return False, "multiple centers in region"
-        # if self._touch_edges(temp_mask_open):  # Region touches the border of the volume
-        #     return False, "region touches border"
+        # if self._touch_edges(temp_mask_open):  # Region touches the border of the image
+        #     return False, "region touches border of image"
         return True, "good"
 
     def _segment(self, regions, values, centers, cytoplasm=None):
         labels = np.zeros_like(regions)
+        # Region #0 is the background
         start = 1
         for lbl in range(start, regions.max() + start):
             print(f"Segment {self.ch_id}: {lbl:3d}/{regions.max():3d}")

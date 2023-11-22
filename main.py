@@ -439,6 +439,9 @@ def analyze_image(
 
     # Evaluate potential nuclei properties
     # TODO: consider adding the detected centers and sigmas
+    # TODO: change this to teh usual format where results are loaded from the
+    # TODO: file, if they exist or they are stored the first time they are
+    # TODO: calculated. This should be controlled by the regenerate_nuclei.
     print("Evaluating potential nuclei properties from mask... ", end="", flush=True)
     nuclei_props_df = pd.DataFrame(
         ski_mea.regionprops_table(

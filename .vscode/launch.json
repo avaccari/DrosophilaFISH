@@ -160,6 +160,39 @@
       ]
     },
     {
+      "name": "Python: main.py (--visualize --nuclei_wavelength 498 --cytoplasm_wavelength 415 --regenerate_nuclei)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--visualize",
+        "--nuclei_wavelength",
+        "498",
+        "--cytoplasm_wavelength",
+        "415",
+        "--regenerate_nuclei"
+      ]
+    },
+    {
+      "name": "Python: main.py (--visualize --nuclei_wavelength 571 --cytoplasm_wavelength 415 --channels 3)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--visualize",
+        "--nuclei_wavelength",
+        "571",
+        "--cytoplasm_wavelength",
+        "415",
+        "--channels",
+        "3"
+      ]
+    },
+    {
       "name": "Python: main.py (--channels 3)",
       "type": "python",
       "request": "launch",
