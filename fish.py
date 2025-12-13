@@ -62,7 +62,7 @@ def _detections_at_threshold(
             df.loc[:, "keep"] = False
             for d_idx, d_row in df.iterrows():
                 coo = d_row[["Z", "Y", "X"]].astype("uint16")
-                label = nuclei_labels[coo[0], coo[1], coo[2]]
+                label = nuclei_labels[coo[0], coo[1], coo[2]]  # Note: here we could add some additonal buffer around the nucleus
                 if label != 0 and label == lbl:
                     df.at[d_idx, "keep"] = True
             df = df[df["keep"]].drop(columns=["keep"])

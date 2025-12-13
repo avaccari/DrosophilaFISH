@@ -1,3 +1,4 @@
+import sys
 import argparse
 import os.path as osp
 from tkinter import filedialog
@@ -54,7 +55,8 @@ def analyze_image(
         return
 
     # Ask user to choose a file
-    print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}")
+    print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}{Style.RESET_ALL}")
+    print(f"Original command: {Style.BRIGHT}{Fore.GREEN}{' '.join(sys.argv)}{Style.RESET_ALL}")
     if filename is None:
         filename = filedialog.askopenfilename(
             filetypes=[("CZI files", "*.czi"), ("Numpy files", "*.npy")],
