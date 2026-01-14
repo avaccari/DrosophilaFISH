@@ -436,35 +436,9 @@ def analyze_image(
             visible=False,
         )
 
-    ################################################################################
-    # Hack to be improved: Dilate preserved nuclei labels to identify nearby puncta
-    # Right now this is done inside the nuclei segmentation, but the features are
-    # then calculated on the dilated labels, which might not be ideal.
-    # print("Dilate preserved nuclei to include part of the surrounding cytoplasm:")
-    # # nuclei_labels = filter(
-    # #     nuclei_labels,
-    # #     type="maximum",
-    # #     footprint=ski_mor.ball(5)[2::3],
-    # #     # footprint=ski_mor.ball(7)[3::4],
-    # #     # footprint=ski_mor.ball(9)[1::4],
-    # #     filename_root=filename,
-    # #     ch_id=image.ch_dict[image.ch_dict["Nuclei"]],
-    # # )
-    #
-    # if visualize:
-    #     nuclei_viz = viewer.add_labels(
-    #         nuclei_labels,
-    #         name=image.ch_dict[image.ch_dict["Nuclei"]] + "-labels-dilate",
-    #         scale=image.scaling,
-    #         blending="additive",
-    #         visible=True,
-    #     )
-    #     nuclei_viz.contour = 2
-    ################################################################################
-
     # Evaluate potential nuclei properties
     # TODO: consider adding the detected centers and sigmas
-    # TODO: change this to teh usual format where results are loaded from the
+    # TODO: change this to the usual format where results are loaded from the
     # TODO: file, if they exist or they are stored the first time they are
     # TODO: calculated. This should be controlled by the regenerate_nuclei.
     print("Evaluating potential nuclei properties from mask... ", end="", flush=True)
@@ -775,7 +749,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--nuclei_dilation",
-        help="Percentage (of radius) dilation to apply to the individual nuclei labels after segmentation to include part of the surrounding cytoplasm. (Default: 0, no dilation)",
+        help="Fraction (of radius) dilation to apply to the individual nuclei labels after segmentation. The remaining analysis will be based on the dilated nuclei. (Default: 0, no dilation)",
         type=float,
         default=0,
     )
