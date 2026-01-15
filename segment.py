@@ -313,26 +313,32 @@ class NucleiSegmentation:
 
                 # TODO: it might make sense to first evaluate the properties and then do the dilation or save dilation on a different image
                 # If required, dilate the mask before adding it to the labels
-                if nuclei_dilation > 0:
-                    print(f" - dilating by {100 * nuclei_dilation}% ...", end="")
-                    # Find bounding box of current nucleus
-                    bbox = np.argwhere(temp_mask_open)
-                    bbox_min = bbox.min(axis=0)
-                    bbox_max = bbox.max(axis=0) + 1
-                    # Extract the bounding box with the nucleus
-                    footprint = temp_mask_open[
-                        bbox_min[0] : bbox_max[0],
-                        bbox_min[1] : bbox_max[1],
-                        bbox_min[2] : bbox_max[2],
-                    ]
-                    # Create a footprint by scaling the nucleus
-                    footprint = zoom(footprint, nuclei_dilation, order=0)
-                    # Dilate the nucleus
-                    temp_mask_open = ski_mor.dilation(
-                        temp_mask_open, footprint=footprint
+                try:
+                    if nuclei_dilation > 0:
+                        print(f" - dilating by {100 * nuclei_dilation}% ...", end="")
+                        # Find bounding box of current nucleus
+                        bbox = np.argwhere(temp_mask_open)
+                        bbox_min = bbox.min(axis=0)
+                        bbox_max = bbox.max(axis=0) + 1
+                        # Extract the bounding box with the nucleus
+                        footprint = temp_mask_open[
+                            bbox_min[0] : bbox_max[0],
+                            bbox_min[1] : bbox_max[1],
+                            bbox_min[2] : bbox_max[2],
+                        ]
+                        # Create a footprint by scaling the nucleus
+                        footprint = zoom(footprint, nuclei_dilation, order=0)
+                        # Dilate the nucleus
+                        temp_mask_open = ski_mor.dilation(
+                            temp_mask_open, footprint=footprint
+                        )
+                        print(" done!", end="")
+                    print("")
+                except MemoryError:
+                    print(
+                        f"{Fore.RED} ✕ (dilation failed: MemoryError){Style.RESET_ALL}"
                     )
-                    print(" done!", end="")
-                print("")
+                    continue
 
                 # Restrict temp_mask_open to the volume defined by temp_region
                 temp_mask_open = temp_mask_open & temp_region
