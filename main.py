@@ -22,6 +22,17 @@ from voronoi import evaluate_voronoi
 #! file, all the following steps are re-evaluated instead of using stored values
 #! Implement the "overwrite" arguments in the analyze_image() function.
 
+### 2026-01-01
+### Dilate nuclei during the detection: individually making sure you don't go outside the Vornoi cell.
+### Run on the 3 datasets: NOstim_1, stim10_7, stim10_1 (cdk8)
+### Check what features are stored in the nuclei_props_df and if we need to add more (volume)
+### When you save the nuclei tiff add the scaling so that it opens correctly in napari
+### Might be more efficient to first do the usual segmentation and then screen the nuclei based
+### on the statistics of the segmented ones, and then dilate the ones that are preserved if needed.
+### You can probably parallelize the nuclei segmentation, you just have to be careful when you
+### update the mask.
+### It might be worth saving the dilated nuclei as a separate layer.
+
 
 def analyze_image(
     filename=None,
@@ -43,11 +54,12 @@ def analyze_image(
     regenerate_all=False,
     nuclei_sigma_range=[15, 25, 3],
     nuclei_threshold=20,
+    nuclei_dilation=0.0,
     out_dir=None,
     show_version=False,
 ):
     # Set version
-    VERSION = "v1.1.0"
+    VERSION = "v1.2.0"
 
     # If we are just showing the version
     if show_version:
@@ -55,8 +67,12 @@ def analyze_image(
         return
 
     # Ask user to choose a file
-    print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}{Style.RESET_ALL}")
-    print(f"Original command: {Style.BRIGHT}{Fore.GREEN}{' '.join(sys.argv)}{Style.RESET_ALL}")
+    print(
+        f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}{Style.RESET_ALL}"
+    )
+    print(
+        f"Original command: {Style.BRIGHT}{Fore.GREEN}{' '.join(sys.argv)}{Style.RESET_ALL}"
+    )
     if filename is None:
         filename = filedialog.askopenfilename(
             filetypes=[("CZI files", "*.czi"), ("Numpy files", "*.npy")],
@@ -91,6 +107,7 @@ def analyze_image(
     print(
         f"{Style.BRIGHT}Nuclei detection threshold:{Style.RESET_ALL} {nuclei_threshold}"
     )
+    print(f"{Style.BRIGHT}Nuclei dilation:{Style.RESET_ALL} {100 * nuclei_dilation}%")
     print(
         f"{Style.BRIGHT}FISH contrast stretching range (None => full range):{Style.RESET_ALL} {fish_contrast_range}"
     )
@@ -163,9 +180,11 @@ def analyze_image(
             image.data[ch] = contrast_stretch(
                 image.data[ch],
                 ch_id=image.ch_dict[ch],
-                in_range=(min_intensity, max_intensity)
-                if fish_contrast_range is None
-                else (fish_contrast_range[0], fish_contrast_range[1]),
+                in_range=(
+                    (min_intensity, max_intensity)
+                    if fish_contrast_range is None
+                    else (fish_contrast_range[0], fish_contrast_range[1])
+                ),
             )
 
     # If needed, convert to uint8
@@ -320,7 +339,7 @@ def analyze_image(
         nuclei_centers_viz = viewer.add_points(
             nuclei_centers[:, :3],
             name=image.ch_dict[image.ch_dict["Nuclei"]] + "-centers",
-            size=nuclei_centers[:, 3:],
+            size=nuclei_centers[:, 3:].mean(axis=1) * 2 * np.sqrt(2),
             symbol="disc",
             opacity=1,
             scale=image.scaling,
@@ -362,13 +381,15 @@ def analyze_image(
     nuclei = NucleiSegmentation(
         filename_root=filename,
         ch_id=image.ch_dict[image.ch_dict["Nuclei"]],
+        scaling=image.scaling,
         overwrite=regenerate_nuclei,
         out_dir=out_dir,
     )
     nuclei_labels = nuclei.segment(
-        labels=nuclei_regions,
+        regions=nuclei_regions,
         values=nuclei_den,
         centers=nuclei_centers[:, :3],
+        nuclei_dilation=nuclei_dilation,
         cytoplasm=cytoplasm_den if "Cytoplasm" in image.ch_dict else None,
         write_to_tiff=True,
     )
@@ -415,33 +436,9 @@ def analyze_image(
             visible=False,
         )
 
-    ################################################################################
-    # Hack to be improved: Dilate preserved nuclei labels to identify nearby puncta
-    # print("Dilate preserved nuclei to include part of the surrounding cytoplasm:")
-    # # nuclei_labels = filter(
-    # #     nuclei_labels,
-    # #     type="maximum",
-    # #     footprint=ski_mor.ball(5)[2::3],
-    # #     # footprint=ski_mor.ball(7)[3::4],
-    # #     # footprint=ski_mor.ball(9)[1::4],
-    # #     filename_root=filename,
-    # #     ch_id=image.ch_dict[image.ch_dict["Nuclei"]],
-    # # )
-    #
-    # if visualize:
-    #     nuclei_viz = viewer.add_labels(
-    #         nuclei_labels,
-    #         name=image.ch_dict[image.ch_dict["Nuclei"]] + "-labels-dilate",
-    #         scale=image.scaling,
-    #         blending="additive",
-    #         visible=True,
-    #     )
-    #     nuclei_viz.contour = 2
-    ################################################################################
-
     # Evaluate potential nuclei properties
     # TODO: consider adding the detected centers and sigmas
-    # TODO: change this to teh usual format where results are loaded from the
+    # TODO: change this to the usual format where results are loaded from the
     # TODO: file, if they exist or they are stored the first time they are
     # TODO: calculated. This should be controlled by the regenerate_nuclei.
     print("Evaluating potential nuclei properties from mask... ", end="", flush=True)
@@ -698,6 +695,8 @@ if __name__ == "__main__":
         type=int,
         default=4,
     )
+
+    # Nuclei selection options
     nuclei_sel_group = parser.add_argument_group(
         "Nuclei channel selection",
         "If not None, --nuclei_wavelength takes precedence over --nuclei_ch.",
@@ -715,6 +714,8 @@ if __name__ == "__main__":
         type=int,
         default=None,
     )
+
+    # Cytoplasm selection options
     cytoplasm_sel_group = parser.add_argument_group(
         "Cytoplasm channel selection",
         "If not None, --cytoplasm_wavelength takes precedence over --cytoplasm_ch.",
@@ -732,6 +733,7 @@ if __name__ == "__main__":
         type=int,
         default=None,
     )
+
     parser.add_argument(
         "--nuclei_sigma_range",
         help="Range min max steps to use as LOG sigmas for the nuclei detection. (Default: 15 25 3. Pass as 3 space-separated values).",
@@ -744,6 +746,12 @@ if __name__ == "__main__":
         help="Threshold to use in LOG for the nuclei detection. (Default: 20)",
         type=float,
         default=20,
+    )
+    parser.add_argument(
+        "--nuclei_dilation",
+        help="Fraction (of radius) dilation to apply to the individual nuclei labels after segmentation. The remaining analysis will be based on the dilated nuclei. (Default: 0, no dilation)",
+        type=float,
+        default=0,
     )
     parser.add_argument(
         "--fish_contrast_range",
@@ -790,6 +798,7 @@ if __name__ == "__main__":
         default=False,
         action="store_true",
     )
+
     parser.add_argument(
         "--output_dir",
         help="Directory where to look for and store the folder containing results and auxiliary files. (Default: the same directory as the input file)",
@@ -829,6 +838,7 @@ if __name__ == "__main__":
         regenerate_all=args.regenerate_all,
         nuclei_sigma_range=args.nuclei_sigma_range,
         nuclei_threshold=args.nuclei_threshold,
+        nuclei_dilation=args.nuclei_dilation,
         out_dir=args.output_dir,
         show_version=args.version,
     )

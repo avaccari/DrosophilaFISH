@@ -74,7 +74,9 @@ def store_to_npy(
     return output
 
 
-def write_to_tif(array, filename_root=None, ch_id=None, suffix="", out_dir=None):
+def write_to_tif(
+    array, filename_root=None, ch_id=None, scaling=None, suffix="", out_dir=None
+):
     if ch_id is None:
         raise ValueError(
             "A ch_id should be provided to identify the channel. Image is not written."
@@ -84,18 +86,31 @@ def write_to_tif(array, filename_root=None, ch_id=None, suffix="", out_dir=None)
             "A filename_root should be provided to identify the file. Image is not written."
         )
     else:
-        print(f"Writing {ch_id} as image...", end="", flush=True)
+        print(
+            f"Writing {ch_id} as image with scaling {scaling if scaling is not None else (1, 1, 1)}...",
+            end="",
+            flush=True,
+        )
         file = build_path(filename_root, f"-{ch_id}-{suffix}.tif", out_dir=out_dir)
         try:
             root_dir = build_path(filename_root, out_dir=out_dir)
             if not os.path.isdir(root_dir):
                 os.makedirs(root_dir)
+            # TODO: the scaling is still not recognized in either napari or Fiji...
             tifffile.imwrite(
                 file,
                 array,
                 imagej=True,
                 compression="zlib",
                 compressionargs={"level": 9},
+                resolution=(
+                    1.0 / scaling[2] if scaling is not None else 1,
+                    1.0 / scaling[1] if scaling is not None else 1,
+                ),
+                metadata={
+                    "spacing": scaling[0] if scaling is not None else 1,
+                    "axes": "ZYX",
+                },
             )
             print("done!")
         except Exception:
