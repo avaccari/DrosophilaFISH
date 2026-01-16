@@ -254,6 +254,7 @@ class NucleiSegmentation:
         return True, "good"
 
     def _segment(self, regions, values, centers, nuclei_dilation=0, cytoplasm=None):
+        # TODO: parallelize over regions
         labels = np.zeros_like(regions)
         # Region #0 is the background
         start = 1

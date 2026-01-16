@@ -3,7 +3,6 @@ import argparse
 import os.path as osp
 from tkinter import filedialog
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import skimage.measure as ski_mea
@@ -21,17 +20,6 @@ from voronoi import evaluate_voronoi
 #! IMPORTANT FOR CONSISTENCY: add a flag so that if there is an exception with a
 #! file, all the following steps are re-evaluated instead of using stored values
 #! Implement the "overwrite" arguments in the analyze_image() function.
-
-### 2026-01-01
-### Dilate nuclei during the detection: individually making sure you don't go outside the Vornoi cell.
-### Run on the 3 datasets: NOstim_1, stim10_7, stim10_1 (cdk8)
-### Check what features are stored in the nuclei_props_df and if we need to add more (volume)
-### When you save the nuclei tiff add the scaling so that it opens correctly in napari
-### Might be more efficient to first do the usual segmentation and then screen the nuclei based
-### on the statistics of the segmented ones, and then dilate the ones that are preserved if needed.
-### You can probably parallelize the nuclei segmentation, you just have to be careful when you
-### update the mask.
-### It might be worth saving the dilated nuclei as a separate layer.
 
 
 def analyze_image(
@@ -148,7 +136,6 @@ def analyze_image(
             blending="additive",
             scale=image.scaling,
             depiction="volume",
-            interpolation="nearest",
             visible=False,
         )
 
@@ -241,7 +228,6 @@ def analyze_image(
             blending="additive",
             scale=image.scaling,
             depiction="volume",
-            interpolation="nearest",
             visible=False,
         )
 
@@ -262,7 +248,6 @@ def analyze_image(
             colormap=image.ch_dict["colormaps"][image.ch_dict["Nuclei"]],
             blending="additive",
             scale=image.scaling,
-            interpolation="nearest",
             visible=False,
         )
 
@@ -284,7 +269,6 @@ def analyze_image(
                 colormap=image.ch_dict["colormaps"][image.ch_dict["Cytoplasm"]],
                 blending="additive",
                 scale=image.scaling,
-                interpolation="nearest",
                 visible=False,
             )
 
@@ -343,7 +327,7 @@ def analyze_image(
             symbol="disc",
             opacity=1,
             scale=image.scaling,
-            edge_color="green",
+            border_color="green",
             face_color="green",
             blending="additive",
             out_of_slice_display=True,
@@ -393,48 +377,6 @@ def analyze_image(
         cytoplasm=cytoplasm_den if "Cytoplasm" in image.ch_dict else None,
         write_to_tiff=True,
     )
-    if visualize:
-        nuclei_viz = viewer.add_labels(
-            nuclei_labels,
-            name=image.ch_dict[image.ch_dict["Nuclei"]] + "-labels",
-            scale=image.scaling,
-            blending="additive",
-            visible=True,
-        )
-        nuclei_viz.contour = 2
-
-    # Segment the cytoplasm
-    # cytoplasm = CytoplasmSegmentation(regions=nuclei_regions, value=cytoplasm_den)
-    # cytoplasm_labels = cytoplasm.segment()
-    # cytoplasm_labels = segment_region(
-    #     nuclei_regions,
-    #     np.invert(cytoplasm_den),
-    #     filename_root=filename,
-    #     ch_id=image.ch_dict[image.ch_dict["Cytoplasm"]],
-    # )
-    # if visualize:
-    #     cytoplasm_viz = viewer.add_labels(
-    #         cytoplasm_labels,
-    #         name=image.ch_dict[image.ch_dict["Cytoplasm"]] + "-labels",
-    #         scale=image.scaling,
-    #         blending="additive",
-    #         visible=True,
-    #     )
-    #     cytoplasm_viz.contour = 2
-
-    # Evaluate the overall nuclei mask
-    nuclei_labels_mask = nuclei_labels > 0
-    if visualize:
-        viewer.add_image(
-            nuclei_labels_mask,
-            name=image.ch_dict[image.ch_dict["Nuclei"]] + "-msk",
-            opacity=0.5,
-            scale=image.scaling,
-            colormap="blue",
-            blending="additive",
-            interpolation="nearest",
-            visible=False,
-        )
 
     # Evaluate potential nuclei properties
     # TODO: consider adding the detected centers and sigmas
@@ -469,6 +411,91 @@ def analyze_image(
     )
     nuclei_props_df.to_json(path + ".json")
     nuclei_props_df.to_csv(path + ".csv")
+
+    # Visualize nuclei labels and add features to napari layer
+    if visualize:
+        nuclei_viz = viewer.add_labels(
+            nuclei_labels,
+            name=image.ch_dict[image.ch_dict["Nuclei"]] + "-labels",
+            scale=image.scaling,
+            blending="additive",
+            visible=True,
+        )
+        nuclei_viz.contour = 2
+        nuclei_viz.features = nuclei_props_df
+
+    # Plot/save nuclei equivalent_diameter_area vs label scatter
+    plt.figure(figsize=(8, 6))
+    plt.scatter(
+        nuclei_props_df["label"],
+        nuclei_props_df["equivalent_diameter_area"],
+    )
+    median_diameter = nuclei_props_df["equivalent_diameter_area"].median()
+    q1 = nuclei_props_df["equivalent_diameter_area"].quantile(0.25)
+    q3 = nuclei_props_df["equivalent_diameter_area"].quantile(0.75)
+    iqr = q3 - q1
+    plots = [
+        (median_diameter, "red", "--", "Median"),
+        (q1, "orange", "--", "1st Quartile"),
+        (q3, "orange", "--", "3rd Quartile"),
+        (q1 - 1.5 * iqr, "green", "--", "Lower Outlier"),
+        (q3 + 1.5 * iqr, "green", "--", "Upper Outlier"),
+    ]
+    for value, color, linestyle, label in plots:
+        plt.axhline(
+            value,
+            color=color,
+            linestyle=linestyle,
+            label=label,
+        )
+    plt.legend(loc="lower left")
+    plt.title("Equivalent Diameter Area vs Label")
+    plt.xlabel("Nucleus Label")
+    plt.ylabel("Equivalent Diameter Area (pixels)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt_path = os_utils.build_path(
+        filename,
+        f"-{image.ch_dict[image.ch_dict['Nuclei']]}-equivalent-diameter-area-scatter",
+        out_dir=out_dir,
+    )
+    plt.savefig(plt_path + ".png", dpi=300)
+    if visualize:
+        plt.show()
+    else:
+        plt.close()
+
+    # Segment the cytoplasm
+    # cytoplasm = CytoplasmSegmentation(regions=nuclei_regions, value=cytoplasm_den)
+    # cytoplasm_labels = cytoplasm.segment()
+    # cytoplasm_labels = segment_region(
+    #     nuclei_regions,
+    #     np.invert(cytoplasm_den),
+    #     filename_root=filename,
+    #     ch_id=image.ch_dict[image.ch_dict["Cytoplasm"]],
+    # )
+    # if visualize:
+    #     cytoplasm_viz = viewer.add_labels(
+    #         cytoplasm_labels,
+    #         name=image.ch_dict[image.ch_dict["Cytoplasm"]] + "-labels",
+    #         scale=image.scaling,
+    #         blending="additive",
+    #         visible=True,
+    #     )
+    #     cytoplasm_viz.contour = 2
+
+    # Evaluate the overall nuclei mask
+    nuclei_labels_mask = nuclei_labels > 0
+    if visualize:
+        viewer.add_image(
+            nuclei_labels_mask,
+            name=image.ch_dict[image.ch_dict["Nuclei"]] + "-msk",
+            opacity=0.5,
+            scale=image.scaling,
+            colormap="blue",
+            blending="additive",
+            visible=False,
+        )
 
     # FISH detection ##############################################################
 
@@ -511,7 +538,6 @@ def analyze_image(
                 colormap="magenta",
                 blending="additive",
                 scale=image.scaling,
-                interpolation="nearest",
                 visible=False,
             )
 
@@ -535,7 +561,6 @@ def analyze_image(
                 colormap=image.ch_dict["colormaps"][ch],
                 blending="additive",
                 scale=image.scaling,
-                interpolation="nearest",
                 visible=True,
             )
 
@@ -612,7 +637,7 @@ def analyze_image(
                 symbol="ring",
                 opacity=1,
                 scale=image.scaling,
-                edge_color=napari.utils.colormaps.bop_colors.bopd[
+                border_color=napari.utils.colormaps.bop_colors.bopd[
                     image.ch_dict["colormaps"][ch]
                 ][1][-1],
                 face_color=napari.utils.colormaps.bop_colors.bopd[
@@ -815,8 +840,15 @@ if __name__ == "__main__":
     if args.visualize or args.visualize_only:
         import napari
         from magicgui import magicgui
+        import matplotlib.pyplot as plt
 
         plt.ion()
+
+    else:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
 
     analyze_image(
         args.file,
