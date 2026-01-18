@@ -425,11 +425,24 @@ def analyze_image(
         nuclei_viz.features = nuclei_props_df
 
     # Plot/save nuclei equivalent_diameter_area vs label scatter
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(16, 9))
     plt.scatter(
         nuclei_props_df["label"],
         nuclei_props_df["equivalent_diameter_area"],
+        s=9,
     )
+    for x, y in zip(
+        nuclei_props_df["label"], nuclei_props_df["equivalent_diameter_area"]
+    ):
+        plt.annotate(
+            f"{x}",
+            (x, y),
+            textcoords="offset points",
+            xytext=(5, 0),
+            ha="left",
+            va="center",
+            fontsize=8,
+        )
     median_diameter = nuclei_props_df["equivalent_diameter_area"].median()
     q1 = nuclei_props_df["equivalent_diameter_area"].quantile(0.25)
     q3 = nuclei_props_df["equivalent_diameter_area"].quantile(0.75)
