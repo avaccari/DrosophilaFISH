@@ -462,7 +462,7 @@ def analyze_image(
             label=label,
         )
     plt.legend(loc="lower left")
-    plt.title("Equivalent Diameter Area vs Label")
+    plt.title(f"Equivalent Diameter Area vs Label ({osp.split(filename)[1]})")
     plt.xlabel("Nucleus Label")
     plt.ylabel("Equivalent Diameter Area (pixels)")
     plt.grid(True)
