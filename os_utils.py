@@ -96,10 +96,10 @@ def write_to_tif(
             root_dir = build_path(filename_root, out_dir=out_dir)
             if not os.path.isdir(root_dir):
                 os.makedirs(root_dir)
-            # TODO: the scaling is still not recognized in either napari or Fiji...
+            # TODO: the scaling is correct for ImageJ but in napari is read as ZYX instad of TZYX
             tifffile.imwrite(
                 file,
-                array,
+                array[np.newaxis, ...],  # Expand to TZYX
                 imagej=True,
                 compression="zlib",
                 compressionargs={"level": 9},
@@ -108,10 +108,14 @@ def write_to_tif(
                     1.0 / scaling[1] if scaling is not None else 1,
                 ),
                 metadata={
+                    "axes": "TZYX",
                     "spacing": scaling[0] if scaling is not None else 1,
-                    "axes": "ZYX",
+                    "PhysicalSizeZ": scaling[0] if scaling is not None else 1,
+                    "PhysicalSizeY": scaling[1] if scaling is not None else 1,
+                    "PhysicalSizeX": scaling[2] if scaling is not None else 1,
+                    "unit": "",
                 },
             )
             print("done!")
-        except Exception:
-            print("WARNING: error saving the file.")
+        except Exception as e:
+            print(f"WARNING: error saving the file: {e}")
