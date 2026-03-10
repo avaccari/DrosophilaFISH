@@ -142,11 +142,11 @@ class Image:
         print(
             f"{Style.BRIGHT}{Fore.BLUE}############ Image metadata: ############{Style.RESET_ALL}"
         )
-        print(f"{Style.BRIGHT}Image shape (Z, Y, X):{Style.RESET_ALL}")
+        print(f"{Style.BRIGHT}Image shape (Z, Y, X) voxels:{Style.RESET_ALL}")
         print(f"  {self.channels_no} channels => {self.size}")
         print(f"{Style.BRIGHT}Channels:{Style.RESET_ALL}")
         [print(f"  {k} <=> {v}") for k, v in self.channels_meta.items()]
-        print(f"{Style.BRIGHT}Pixel sizes (Z, Y, X):{Style.RESET_ALL}")
+        print(f"{Style.BRIGHT}Voxel size (Z, Y, X):{Style.RESET_ALL}")
         print(f"  {self.scaling}")
         print(f"{Style.BRIGHT}Spacing ratio (Z / X or Y):{Style.RESET_ALL}")
         print(f"  {self.scale_ratio}")
@@ -209,8 +209,8 @@ class Image:
             ]
 
             for ch in self.ch_dict["fish"]:
-                self.ch_dict[
-                    ch
-                ] = f"FISH_{int(float(self.channels_meta[ch]['Wavelength']))}"
+                self.ch_dict[ch] = (
+                    f"FISH_{int(float(self.channels_meta[ch]['Wavelength']))}"
+                )
 
                 self.ch_dict["colormaps"][ch] = colors.pop(0)
