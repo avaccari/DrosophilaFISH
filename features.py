@@ -36,7 +36,7 @@ def detect_blobs(
         ski_fea.blob_log,
         filename_root=filename_root,
         ch_id=ch_id,
-        suffix=f"blb-{tuple(np.round(min_sigma, decimals=2))}-{tuple(np.round(max_sigma, decimals=2))}",
+        suffix=f"blb-{tuple(np.round(min_sigma, decimals=2))}-{tuple(np.round(max_sigma, decimals=2))}-{num_sigma}-{threshold}",
         func_args={
             "image": data,
             "min_sigma": min_sigma,
