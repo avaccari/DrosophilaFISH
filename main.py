@@ -774,7 +774,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--nuclei_sigma_range",
-        help="Range min max steps to use as LOG sigmas for the nuclei detection. (Default: 15 25 3. Pass as 3 space-separated values).",
+        help="Range min max steps to use as LOG sigmas for the nuclei detection. (Default: 10 25 3. Pass as 3 space-separated values).",
         nargs=3,
         type=int,
         default=[10, 25, 3],
