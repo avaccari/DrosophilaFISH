@@ -127,7 +127,10 @@ def analyze_image(
     # Show original data
     if visualize or visualize_only:
         # Show pre-processed data
-        viewer = napari.Viewer(title=osp.split(filename)[1], ndisplay=3)
+        # ndisplay=3 must be set after layers are added; passing it at Viewer
+        # construction triggers a napari 0.7.0 bug where the VolumeNode is
+        # initialized before _data_view has a 3D slice ready.
+        viewer = napari.Viewer(title=osp.split(filename)[1])
         viewer.add_image(
             image.data,
             channel_axis=0,
@@ -141,6 +144,7 @@ def analyze_image(
 
     if visualize_only:
         print(f"{Fore.RED}{Style.BRIGHT}--- Analysis finished ---{Style.RESET_ALL}\n\n")
+        viewer.dims.ndisplay = 3
         napari.run()
         return
 
@@ -515,6 +519,7 @@ def analyze_image(
     if no_fish or "fish" not in image.ch_dict:
         print(f"{Fore.RED}{Style.BRIGHT}--- Analysis finished ---{Style.RESET_ALL}\n\n")
         if visualize:
+            viewer.dims.ndisplay = 3
             napari.run()
         return
 
@@ -692,6 +697,7 @@ def analyze_image(
         # Add the widgets
         viewer.window.add_dock_widget(threshold_puncta)
 
+        viewer.dims.ndisplay = 3
         napari.run()
 
 
