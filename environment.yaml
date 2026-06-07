@@ -1,0 +1,17 @@
+name: flyseg
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - pandas
+  - colorama
+  - matplotlib
+  - scipy
+  - numpy
+  - xmltodict
+  - scikit-image
+  - czifile
+  - tifffile
+  - napari
+  - pyside6
+prefix: /opt/homebrew/Caskroom/miniconda/base/envs/flyseg
