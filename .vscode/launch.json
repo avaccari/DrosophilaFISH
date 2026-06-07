@@ -145,6 +145,125 @@
       "args": ["--visualize", "--nuclei_ch", "1"]
     },
     {
+      "name": "Python: main.py (--visualize --nuclei_wavelength 498 --cytoplasm_wavelength 415)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--visualize",
+        "--nuclei_wavelength",
+        "498",
+        "--cytoplasm_wavelength",
+        "415"
+      ]
+    },
+    {
+      "name": "Python: main.py (--visualize --nuclei_wavelength 498 --cytoplasm_wavelength 415 --channels 3 --nuclei_dilation 0.25)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--visualize",
+        "--nuclei_wavelength",
+        "498",
+        "--cytoplasm_wavelength",
+        "415",
+        "--channels",
+        "3",
+        "--nuclei_dilation",
+        "0.25"
+      ]
+    },
+    {
+      "name": "Python: main.py (--visualize --nuclei_wavelength 498 --cytoplasm_wavelength 415 --channels 3 --nuclei_dilation 0.5)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--visualize",
+        "--nuclei_wavelength",
+        "498",
+        "--cytoplasm_wavelength",
+        "415",
+        "--channels",
+        "3",
+        "--nuclei_dilation",
+        "0.5"
+      ]
+    },
+    {
+      "name": "Python: main.py (--visualize --nuclei_wavelength 498 --cytoplasm_wavelength 415 --channels 3)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--visualize",
+        "--nuclei_wavelength",
+        "498",
+        "--cytoplasm_wavelength",
+        "415",
+        "--channels",
+        "3",
+      ]
+    },
+    {
+      "name": "Python: main.py (--nuclei_wavelength 498 --cytoplasm_wavelength 415 --channels 3)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--nuclei_wavelength",
+        "498",
+        "--cytoplasm_wavelength",
+        "415",
+        "--channels",
+        "3",
+      ]
+    },
+    {
+      "name": "Python: main.py (--visualize --nuclei_wavelength 498 --cytoplasm_wavelength 415 --regenerate_nuclei)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--visualize",
+        "--nuclei_wavelength",
+        "498",
+        "--cytoplasm_wavelength",
+        "415",
+        "--regenerate_nuclei"
+      ]
+    },
+    {
+      "name": "Python: main.py (--visualize --nuclei_wavelength 571 --cytoplasm_wavelength 415 --channels 3)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "--visualize",
+        "--nuclei_wavelength",
+        "571",
+        "--cytoplasm_wavelength",
+        "415",
+        "--channels",
+        "3"
+      ]
+    },
+    {
       "name": "Python: main.py (--channels 3)",
       "type": "python",
       "request": "launch",

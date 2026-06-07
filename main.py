@@ -1,8 +1,8 @@
+import sys
 import argparse
 import os.path as osp
 from tkinter import filedialog
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import skimage.measure as ski_mea
@@ -32,18 +32,35 @@ def analyze_image(
     no_fish=False,
     fish_contrast_range=None,
     fish_threshold_range=[2, 10.5, 0.5],
-    cytoplasm_ch=3,
     nuclei_ch=0,
+    nuclei_wavelength=None,
+    cytoplasm_ch=3,
+    cytoplasm_wavelength=None,
     regenerate_pre=False,
     regenerate_nuclei=False,
     regenerate_fish=False,
     regenerate_all=False,
     nuclei_sigma_range=[15, 25, 3],
     nuclei_threshold=20,
+    nuclei_dilation=0.0,
     out_dir=None,
+    show_version=False,
 ):
+    # Set version
+    VERSION = "v1.2.0"
+
+    # If we are just showing the version
+    if show_version:
+        print(f"Version: {VERSION}")
+        return
+
     # Ask user to choose a file
-    print(f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}")
+    print(
+        f"\n{Fore.RED}{Style.BRIGHT}--- Starting new analysis ---{Style.RESET_ALL}{Style.RESET_ALL}"
+    )
+    print(
+        f"Original command: {Style.BRIGHT}{Fore.GREEN}{' '.join(sys.argv)}{Style.RESET_ALL}"
+    )
     if filename is None:
         filename = filedialog.askopenfilename(
             filetypes=[("CZI files", "*.czi"), ("Numpy files", "*.npy")],
@@ -59,7 +76,9 @@ def analyze_image(
         metadata_only=metadata_only,
         required_channels=channels,
         nuclei_ch=nuclei_ch,
+        nuclei_wavelength=nuclei_wavelength,
         cytoplasm_ch=cytoplasm_ch,
+        cytoplasm_wavelength=cytoplasm_wavelength,
     )
 
     # Stop if we only want the metadata
@@ -76,6 +95,7 @@ def analyze_image(
     print(
         f"{Style.BRIGHT}Nuclei detection threshold:{Style.RESET_ALL} {nuclei_threshold}"
     )
+    print(f"{Style.BRIGHT}Nuclei dilation:{Style.RESET_ALL} {100 * nuclei_dilation}%")
     print(
         f"{Style.BRIGHT}FISH contrast stretching range (None => full range):{Style.RESET_ALL} {fish_contrast_range}"
     )
@@ -107,23 +127,24 @@ def analyze_image(
     # Show original data
     if visualize or visualize_only:
         # Show pre-processed data
-        viewer = napari.Viewer(title=osp.split(filename)[1], ndisplay=3)
+        # ndisplay=3 must be set after layers are added; passing it at Viewer
+        # construction triggers a napari 0.7.0 bug where the VolumeNode is
+        # initialized before _data_view has a 3D slice ready.
+        viewer = napari.Viewer(title=osp.split(filename)[1])
         viewer.add_image(
             image.data,
             channel_axis=0,
-            name=[
-                n + "-orig" for (c, n) in image.ch_dict.items() if isinstance(c, int)
-            ],
-            colormap=image.ch_dict["colormaps"],
+            name=[image.ch_dict[n] + "-orig" for n in range(image.channels_no)],
+            colormap=[image.ch_dict["colormaps"][n] for n in range(image.channels_no)],
             blending="additive",
             scale=image.scaling,
             depiction="volume",
-            interpolation="nearest",
             visible=False,
         )
 
     if visualize_only:
         print(f"{Fore.RED}{Style.BRIGHT}--- Analysis finished ---{Style.RESET_ALL}\n\n")
+        viewer.dims.ndisplay = 3
         napari.run()
         return
 
@@ -150,9 +171,11 @@ def analyze_image(
             image.data[ch] = contrast_stretch(
                 image.data[ch],
                 ch_id=image.ch_dict[ch],
-                in_range=(min_intensity, max_intensity)
-                if fish_contrast_range is None
-                else (fish_contrast_range[0], fish_contrast_range[1]),
+                in_range=(
+                    (min_intensity, max_intensity)
+                    if fish_contrast_range is None
+                    else (fish_contrast_range[0], fish_contrast_range[1])
+                ),
             )
 
     # If needed, convert to uint8
@@ -204,12 +227,11 @@ def analyze_image(
         viewer.add_image(
             image.data,
             channel_axis=0,
-            name=[n + "-pre" for (c, n) in image.ch_dict.items() if isinstance(c, int)],
-            colormap=image.ch_dict["colormaps"],
+            name=[image.ch_dict[n] + "-pre" for n in range(image.channels_no)],
+            colormap=[image.ch_dict["colormaps"][n] for n in range(image.channels_no)],
             blending="additive",
             scale=image.scaling,
             depiction="volume",
-            interpolation="nearest",
             visible=False,
         )
 
@@ -227,10 +249,9 @@ def analyze_image(
         viewer.add_image(
             nuclei_den,
             name=image.ch_dict[image.ch_dict["Nuclei"]] + "-den",
-            colormap="green",
+            colormap=image.ch_dict["colormaps"][image.ch_dict["Nuclei"]],
             blending="additive",
             scale=image.scaling,
-            interpolation="nearest",
             visible=False,
         )
 
@@ -249,10 +270,9 @@ def analyze_image(
             viewer.add_image(
                 cytoplasm_den,
                 name=image.ch_dict[image.ch_dict["Cytoplasm"]] + "-den",
-                colormap="gray",
+                colormap=image.ch_dict["colormaps"][image.ch_dict["Cytoplasm"]],
                 blending="additive",
                 scale=image.scaling,
-                interpolation="nearest",
                 visible=False,
             )
 
@@ -307,11 +327,11 @@ def analyze_image(
         nuclei_centers_viz = viewer.add_points(
             nuclei_centers[:, :3],
             name=image.ch_dict[image.ch_dict["Nuclei"]] + "-centers",
-            size=nuclei_centers[:, 3:],
+            size=nuclei_centers[:, 3:].mean(axis=1) * 2 * np.sqrt(2),
             symbol="disc",
             opacity=1,
             scale=image.scaling,
-            edge_color="green",
+            border_color="green",
             face_color="green",
             blending="additive",
             out_of_slice_display=True,
@@ -349,16 +369,54 @@ def analyze_image(
     nuclei = NucleiSegmentation(
         filename_root=filename,
         ch_id=image.ch_dict[image.ch_dict["Nuclei"]],
+        scaling=image.scaling,
         overwrite=regenerate_nuclei,
         out_dir=out_dir,
     )
     nuclei_labels = nuclei.segment(
-        labels=nuclei_regions,
+        regions=nuclei_regions,
         values=nuclei_den,
         centers=nuclei_centers[:, :3],
+        nuclei_dilation=nuclei_dilation,
         cytoplasm=cytoplasm_den if "Cytoplasm" in image.ch_dict else None,
         write_to_tiff=True,
     )
+
+    # Evaluate potential nuclei properties
+    # TODO: consider adding the detected centers and sigmas
+    # TODO: change this to the usual format where results are loaded from the
+    # TODO: file, if they exist or they are stored the first time they are
+    # TODO: calculated. This should be controlled by the regenerate_nuclei.
+    print("Evaluating potential nuclei properties from mask... ", end="", flush=True)
+    nuclei_props_df = pd.DataFrame(
+        ski_mea.regionprops_table(
+            nuclei_labels,
+            properties=(
+                "label",
+                "area",
+                "axis_major_length",
+                "axis_minor_length",
+                "equivalent_diameter_area",
+                "slice",
+                "solidity",
+            ),
+        )
+    )
+    nuclei_props_df.loc[:, "keep"] = True  # Keep all nuclei for now
+    print("done!")
+
+    print("Nuclei's properties:\n", nuclei_props_df)
+
+    # Save the nuclei properties dataframe
+    path = os_utils.build_path(
+        filename,
+        f"-{image.ch_dict[image.ch_dict['Nuclei']]}-df",
+        out_dir=out_dir,
+    )
+    nuclei_props_df.to_json(path + ".json")
+    nuclei_props_df.to_csv(path + ".csv")
+
+    # Visualize nuclei labels and add features to napari layer
     if visualize:
         nuclei_viz = viewer.add_labels(
             nuclei_labels,
@@ -368,6 +426,61 @@ def analyze_image(
             visible=True,
         )
         nuclei_viz.contour = 2
+        nuclei_viz.features = nuclei_props_df
+
+    # Plot/save nuclei equivalent_diameter_area vs label scatter
+    plt.figure(figsize=(16, 9))
+    plt.scatter(
+        nuclei_props_df["label"],
+        nuclei_props_df["equivalent_diameter_area"],
+        s=9,
+    )
+    for x, y in zip(
+        nuclei_props_df["label"], nuclei_props_df["equivalent_diameter_area"]
+    ):
+        plt.annotate(
+            f"{x}",
+            (x, y),
+            textcoords="offset points",
+            xytext=(5, 0),
+            ha="left",
+            va="center",
+            fontsize=8,
+        )
+    median_diameter = nuclei_props_df["equivalent_diameter_area"].median()
+    q1 = nuclei_props_df["equivalent_diameter_area"].quantile(0.25)
+    q3 = nuclei_props_df["equivalent_diameter_area"].quantile(0.75)
+    iqr = q3 - q1
+    plots = [
+        (median_diameter, "red", "--", "Median"),
+        (q1, "orange", "--", "1st Quartile"),
+        (q3, "orange", "--", "3rd Quartile"),
+        (q1 - 1.5 * iqr, "green", "--", "Lower Outlier"),
+        (q3 + 1.5 * iqr, "green", "--", "Upper Outlier"),
+    ]
+    for value, color, linestyle, label in plots:
+        plt.axhline(
+            value,
+            color=color,
+            linestyle=linestyle,
+            label=label,
+        )
+    plt.legend(loc="lower left")
+    plt.title(f"Equivalent Diameter Area vs Label ({osp.split(filename)[1]})")
+    plt.xlabel("Nucleus Label")
+    plt.ylabel("Equivalent Diameter Area (pixels)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt_path = os_utils.build_path(
+        filename,
+        f"-{image.ch_dict[image.ch_dict['Nuclei']]}-equivalent-diameter-area-scatter",
+        out_dir=out_dir,
+    )
+    plt.savefig(plt_path + ".png", dpi=300)
+    if visualize:
+        plt.show()
+    else:
+        plt.close()
 
     # Segment the cytoplasm
     # cytoplasm = CytoplasmSegmentation(regions=nuclei_regions, value=cytoplasm_den)
@@ -398,70 +511,15 @@ def analyze_image(
             scale=image.scaling,
             colormap="blue",
             blending="additive",
-            interpolation="nearest",
             visible=False,
         )
-
-    ################################################################################
-    # Hack to be improved: Dilate preserved nuclei labels to identify nearby puncta
-    # print("Dilate preserved nuclei to include part of the surrounding cytoplasm:")
-    # # nuclei_labels = filter(
-    # #     nuclei_labels,
-    # #     type="maximum",
-    # #     footprint=ski_mor.ball(5)[2::3],
-    # #     # footprint=ski_mor.ball(7)[3::4],
-    # #     # footprint=ski_mor.ball(9)[1::4],
-    # #     filename_root=filename,
-    # #     ch_id=image.ch_dict[image.ch_dict["Nuclei"]],
-    # # )
-    #
-    # if visualize:
-    #     nuclei_viz = viewer.add_labels(
-    #         nuclei_labels,
-    #         name=image.ch_dict[image.ch_dict["Nuclei"]] + "-labels-dilate",
-    #         scale=image.scaling,
-    #         blending="additive",
-    #         visible=True,
-    #     )
-    #     nuclei_viz.contour = 2
-    ################################################################################
-
-    # Evaluate potential nuclei properties
-    # TODO: consider adding the detected centers and sigmas
-    print("Evaluating potential nuclei properties from mask... ", end="", flush=True)
-    nuclei_props_df = pd.DataFrame(
-        ski_mea.regionprops_table(
-            nuclei_labels,
-            properties=(
-                "label",
-                "area",
-                "axis_major_length",
-                "axis_minor_length",
-                "equivalent_diameter_area",
-                "slice",
-                "solidity",
-            ),
-        )
-    )
-    nuclei_props_df.loc[:, "keep"] = True  # Keep all nuclei for now
-    print("done!")
-
-    print("Nuclei's properties:\n", nuclei_props_df)
-
-    # Save the nuclei properties dataframe
-    path = os_utils.build_path(
-        filename,
-        f"-{image.ch_dict[image.ch_dict['Nuclei']]}-df",
-        out_dir=out_dir,
-    )
-    nuclei_props_df.to_json(path + ".json")
-    nuclei_props_df.to_csv(path + ".csv")
 
     # FISH detection ##############################################################
 
     if no_fish or "fish" not in image.ch_dict:
         print(f"{Fore.RED}{Style.BRIGHT}--- Analysis finished ---{Style.RESET_ALL}\n\n")
         if visualize:
+            viewer.dims.ndisplay = 3
             napari.run()
         return
 
@@ -498,7 +556,6 @@ def analyze_image(
                 colormap="magenta",
                 blending="additive",
                 scale=image.scaling,
-                interpolation="nearest",
                 visible=False,
             )
 
@@ -522,7 +579,6 @@ def analyze_image(
                 colormap=image.ch_dict["colormaps"][ch],
                 blending="additive",
                 scale=image.scaling,
-                interpolation="nearest",
                 visible=True,
             )
 
@@ -599,7 +655,7 @@ def analyze_image(
                 symbol="ring",
                 opacity=1,
                 scale=image.scaling,
-                edge_color=napari.utils.colormaps.bop_colors.bopd[
+                border_color=napari.utils.colormaps.bop_colors.bopd[
                     image.ch_dict["colormaps"][ch]
                 ][1][-1],
                 face_color=napari.utils.colormaps.bop_colors.bopd[
@@ -641,6 +697,7 @@ def analyze_image(
         # Add the widgets
         viewer.window.add_dock_widget(threshold_puncta)
 
+        viewer.dims.ndisplay = 3
         napari.run()
 
 
@@ -665,7 +722,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--visualize_only",
-        help="Only display the image using napari. Implies '--visualize'. (Default: False)",
+        help="Only display the original data using napari. Implies '--visualize'. (Default: False)",
         default=False,
         action="store_true",
     )
@@ -682,21 +739,48 @@ if __name__ == "__main__":
         type=int,
         default=4,
     )
-    parser.add_argument(
+
+    # Nuclei selection options
+    nuclei_sel_group = parser.add_argument_group(
+        "Nuclei channel selection",
+        "If not None, --nuclei_wavelength takes precedence over --nuclei_ch.",
+    )
+    nuclei_sel = nuclei_sel_group.add_mutually_exclusive_group()
+    nuclei_sel.add_argument(
         "--nuclei_ch",
         help="Specifies the channel number where the nuclei are imaged. (Default: 0)",
         type=int,
         default=0,
     )
-    parser.add_argument(
+    nuclei_sel.add_argument(
+        "--nuclei_wavelength",
+        help="Specifies the wavelength of the channel where the nuclei are imaged. (Default: None)",
+        type=int,
+        default=None,
+    )
+
+    # Cytoplasm selection options
+    cytoplasm_sel_group = parser.add_argument_group(
+        "Cytoplasm channel selection",
+        "If not None, --cytoplasm_wavelength takes precedence over --cytoplasm_ch.",
+    )
+    cytoplasm_sel = cytoplasm_sel_group.add_mutually_exclusive_group()
+    cytoplasm_sel.add_argument(
         "--cytoplasm_ch",
         help="Specifies the channel number where the cytoplasm is imaged. Use `None` if the cytoplasm is not imaged. (Default: 3)",
         type=int,
         default=3,
     )
+    cytoplasm_sel.add_argument(
+        "--cytoplasm_wavelength",
+        help="Specifies the wavelength of the channel where the cytoplasm is imaged. (Default: None)",
+        type=int,
+        default=None,
+    )
+
     parser.add_argument(
         "--nuclei_sigma_range",
-        help="Range min max steps to use as LOG sigmas for the nuclei detection. (Default: 15 25 3. Pass as 3 space-separated values).",
+        help="Range min max steps to use as LOG sigmas for the nuclei detection. (Default: 10 25 3. Pass as 3 space-separated values).",
         nargs=3,
         type=int,
         default=[10, 25, 3],
@@ -706,6 +790,12 @@ if __name__ == "__main__":
         help="Threshold to use in LOG for the nuclei detection. (Default: 20)",
         type=float,
         default=20,
+    )
+    parser.add_argument(
+        "--nuclei_dilation",
+        help="Fraction (of radius) dilation to apply to the individual nuclei labels after segmentation. The remaining analysis will be based on the dilated nuclei. (Default: 0, no dilation)",
+        type=float,
+        default=0,
     )
     parser.add_argument(
         "--fish_contrast_range",
@@ -752,9 +842,16 @@ if __name__ == "__main__":
         default=False,
         action="store_true",
     )
+
     parser.add_argument(
         "--output_dir",
         help="Directory where to look for and store the folder containing results and auxiliary files. (Default: the same directory as the input file)",
+    )
+    parser.add_argument(
+        "--version",
+        help="Show version number and exit.",
+        default=False,
+        action="store_true",
     )
 
     args = parser.parse_args()
@@ -762,8 +859,15 @@ if __name__ == "__main__":
     if args.visualize or args.visualize_only:
         import napari
         from magicgui import magicgui
+        import matplotlib.pyplot as plt
 
         plt.ion()
+
+    else:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
 
     analyze_image(
         args.file,
@@ -774,8 +878,10 @@ if __name__ == "__main__":
         metadata_only=args.metadata_only,
         fish_contrast_range=args.fish_contrast_range,
         fish_threshold_range=args.fish_threshold_range,
-        cytoplasm_ch=args.cytoplasm_ch,
         nuclei_ch=args.nuclei_ch,
+        nuclei_wavelength=args.nuclei_wavelength,
+        cytoplasm_ch=args.cytoplasm_ch,
+        cytoplasm_wavelength=args.cytoplasm_wavelength,
         no_fish=args.no_fish,
         regenerate_pre=args.regenerate_pre,
         regenerate_nuclei=args.regenerate_nuclei,
@@ -783,5 +889,7 @@ if __name__ == "__main__":
         regenerate_all=args.regenerate_all,
         nuclei_sigma_range=args.nuclei_sigma_range,
         nuclei_threshold=args.nuclei_threshold,
+        nuclei_dilation=args.nuclei_dilation,
         out_dir=args.output_dir,
+        show_version=args.version,
     )

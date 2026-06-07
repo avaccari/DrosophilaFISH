@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import zoom
 import skimage.measure as ski_mea
 import skimage.morphology as ski_mor
 from colorama import Fore, Style
@@ -40,9 +41,12 @@ class Cost:
 
 
 class NucleiSegmentation:
-    def __init__(self, filename_root, ch_id, overwrite=False, out_dir=None):
+    def __init__(
+        self, filename_root, ch_id, scaling=None, overwrite=False, out_dir=None
+    ):
         self.filename_root = filename_root
         self.ch_id = ch_id
+        self.scaling = scaling
         self.overwrite = overwrite
         self.out_dir = out_dir
         self.costs = {}
@@ -128,14 +132,8 @@ class NucleiSegmentation:
         cost_dict = {
             "out_variance": out_variance,
             "in_variance": in_variance,
-            # "in + out": in_variance + out_variance,
-            "in_cyto_variance": in_cyto_variance,
-            "out_cyto_variance": out_cyto_variance,
-            # "out + out_cyto": out_variance + out_cyto_variance,
-            # "in_cyto + out_cyto": in_cyto_variance + out_cyto_variance,
-            # "in + out + out_cyto": in_variance + out_variance + out_cyto_variance,
-            # "in + out_cyto": in_variance + out_cyto_variance,
-            # "out + in_cyto": out_variance + in_cyto_variance,
+            "in_cyto_variance": in_cyto_variance if temp_cytoplasm is not None else 0,
+            "out_cyto_variance": out_cyto_variance if temp_cytoplasm is not None else 0,
             "surface": surface,
             # "volume": volume,
             # "volume_val": volume_val,
@@ -225,6 +223,7 @@ class NucleiSegmentation:
 
     def _touch_edges(self, temp_mask_open):
         # Check that the region doesn't touch the border of the volume
+        # TODO: modify to check if it touches the border of the image, not the volume
         return (
             temp_mask_open[0, :, :].any()
             or temp_mask_open[-1, :, :].any()
@@ -250,12 +249,14 @@ class NucleiSegmentation:
             return False, "center out of region"
         if check.sum() > 1:  # More than one center inside the region of interest
             return False, "multiple centers in region"
-        # if self._touch_edges(temp_mask_open):  # Region touches the border of the volume
-        #     return False, "region touches border"
+        # if self._touch_edges(temp_mask_open):  # Region touches the border of the image
+        #     return False, "region touches border of image"
         return True, "good"
 
-    def _segment(self, regions, values, centers, cytoplasm=None):
+    def _segment(self, regions, values, centers, nuclei_dilation=0, cytoplasm=None):
+        # TODO: parallelize over regions
         labels = np.zeros_like(regions)
+        # Region #0 is the background
         start = 1
         for lbl in range(start, regions.max() + start):
             print(f"Segment {self.ch_id}: {lbl:3d}/{regions.max():3d}")
@@ -292,8 +293,10 @@ class NucleiSegmentation:
             temp_mask = np.zeros_like(temp_region, dtype="bool")
             temp_mask[temp_region] = temp_values[temp_region] >= threshold_min
 
-            # Open the mask. If this results in more than one component, keep the largest
-            temp_mask_open = ski_mor.opening(temp_mask, footprint=ski_mor.ball(5)[2::3])
+            # Open the mask (fill holes). If this results in more than one component, keep the largest
+            temp_mask_open = ski_mor.opening(
+                temp_mask, footprint=ski_mor.ball(5)[2::3]
+            )  # TODO: this assumes a certain scaling change to reflect current scaling (use the same as below, maybe 5-10% of nucleus size?)
             temp_mask_open_labels = ski_mea.label(temp_mask_open)
             components = ski_mea.regionprops(temp_mask_open_labels)
             if len(components) > 1:
@@ -307,16 +310,58 @@ class NucleiSegmentation:
                 temp_mask_open, centers, z_min, z_max, y_min, y_max, x_min, x_max
             )
             if result:
+                print(f"{Fore.GREEN} ✓ ({reason}){Style.RESET_ALL}", end="")
+
+                # TODO: it might make sense to first evaluate the properties and then do the dilation or save dilation on a different image
+                # If required, dilate the mask before adding it to the labels
+                try:
+                    if nuclei_dilation > 0:
+                        print(f" - dilating by {100 * nuclei_dilation}% ...", end="")
+                        # Find bounding box of current nucleus
+                        bbox = np.argwhere(temp_mask_open)
+                        bbox_min = bbox.min(axis=0)
+                        bbox_max = bbox.max(axis=0) + 1
+                        # Extract the bounding box with the nucleus
+                        footprint = temp_mask_open[
+                            bbox_min[0] : bbox_max[0],
+                            bbox_min[1] : bbox_max[1],
+                            bbox_min[2] : bbox_max[2],
+                        ]
+                        # Create a footprint by scaling the nucleus
+                        footprint = zoom(footprint, nuclei_dilation, order=0)
+                        # Dilate the nucleus
+                        temp_mask_open = ski_mor.dilation(
+                            temp_mask_open, footprint=footprint
+                        )
+                        print(" done!", end="")
+                    print("")
+                except MemoryError:
+                    print(
+                        f"{Fore.RED} ✕ (dilation failed: MemoryError){Style.RESET_ALL}"
+                    )
+                    continue
+
+                # Restrict temp_mask_open to the volume defined by temp_region
+                temp_mask_open = temp_mask_open & temp_region
+
+                # Add the mask to the labels
                 labels[
                     z_min:z_max, y_min:y_max, x_min:x_max
                 ] += lbl * temp_mask_open.astype("uint16")
-                print(f"{Fore.GREEN} ✓ ({reason}){Style.RESET_ALL}")
             else:
                 print(f"{Fore.RED} ✕ ({reason}){Style.RESET_ALL}")
 
         return labels
 
-    def segment(self, labels, values, centers, cytoplasm=None, write_to_tiff=False):
+    def segment(
+        self,
+        regions,
+        values,
+        centers,
+        nuclei_dilation=0,
+        cytoplasm=None,
+        write_to_tiff=False,
+    ):
         print(f"Segmenting {self.ch_id}")
         labels = os_utils.store_to_npy(
             self._segment,
@@ -324,9 +369,10 @@ class NucleiSegmentation:
             ch_id=self.ch_id,
             suffix="labels",
             func_args={
-                "regions": labels,
+                "regions": regions,
                 "values": values,
                 "centers": centers,
+                "nuclei_dilation": nuclei_dilation,
                 "cytoplasm": cytoplasm,
             },
             overwrite=self.overwrite,
@@ -338,6 +384,7 @@ class NucleiSegmentation:
                 labels,
                 filename_root=self.filename_root,
                 ch_id=self.ch_id,
+                scaling=self.scaling,
                 suffix="labels",
                 out_dir=self.out_dir,
             )
