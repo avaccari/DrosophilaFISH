@@ -62,7 +62,7 @@ def _detections_at_threshold(
             df.loc[:, "keep"] = False
             for d_idx, d_row in df.iterrows():
                 coo = d_row[["Z", "Y", "X"]].astype("uint16")
-                label = nuclei_labels[coo[0], coo[1], coo[2]]  # Note: here we could add some additonal buffer around the nucleus
+                label = nuclei_labels[coo.loc["Z"], coo.loc["Y"], coo.loc["X"]]  # Note: here we could add some additonal buffer around the nucleus
                 if label != 0 and label == lbl:
                     df.at[d_idx, "keep"] = True
             df = df[df["keep"]].drop(columns=["keep"])
@@ -135,9 +135,10 @@ def _get_fish_puncta(
             )
             detections_at_thrs_df.loc[:, "label"] = closest_detection[1] + 1
             for _, n_row in detections_at_thrs_df.iterrows():
-                fish_puncta_df.loc[
-                    fish_puncta_df["label"] == n_row["label"], "thresholds"
-                ].iat[0] += [threshold]
+                idx = fish_puncta_df.index[
+                    fish_puncta_df["label"] == n_row["label"]
+                ][0]
+                fish_puncta_df.at[idx, "thresholds"] += [threshold]
 
         # Create a dataframe with the detections for the current thresholds
         # and merge with nuclei info
@@ -162,7 +163,8 @@ def _get_fish_puncta(
     filt = props_df.filter(regex="cnt")
     props_df[filt.columns] = filt.fillna(0)
     filt = props_df.filter(regex="ids")
-    props_df[filt.columns] = filt.fillna(props_df.notna().applymap(lambda x: x or []))
+    for col in filt.columns:
+        props_df[col] = props_df[col].apply(lambda x: x if isinstance(x, list) else [])
 
     return fish_puncta_df, props_df
 

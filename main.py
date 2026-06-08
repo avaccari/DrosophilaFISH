@@ -629,9 +629,8 @@ def analyze_image(
     filtered = nuclei_props_df.filter(regex="cnt")
     nuclei_props_df[filtered.columns] = filtered.fillna(0)
     filtered = nuclei_props_df.filter(regex="ids")
-    nuclei_props_df[filtered.columns] = filtered.fillna(
-        nuclei_props_df.notna().applymap(lambda x: x or [])
-    )
+    for col in filtered.columns:
+        nuclei_props_df[col] = nuclei_props_df[col].apply(lambda x: x if isinstance(x, list) else [])
 
     # Save the nuclei + FISH properties dataframe
     path = os_utils.build_path(
@@ -650,8 +649,7 @@ def analyze_image(
             pts = viewer.add_points(
                 fish_puncta_df[ch][["Z", "Y", "X"]].to_numpy(),
                 name=image.ch_dict[ch] + "-puncta",
-                size=10
-                * fish_puncta_df[ch][["sigma_Z", "sigma_Y", "sigma_X"]].to_numpy(),
+                size=10 * fish_puncta_df[ch][["sigma_Z", "sigma_Y", "sigma_X"]].to_numpy().mean(axis=1),
                 symbol="ring",
                 opacity=1,
                 scale=image.scaling,
