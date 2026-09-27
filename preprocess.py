@@ -52,7 +52,7 @@ def filter(
         args = {"image": data, "footprint": footprint}
     elif type == "gaussian":
         fun = sci_ndi.gaussian_filter
-        suffix = f"den-gaus-{tuple(np.round(sigma, decimals=2))}"
+        suffix = f"den-gaus-{tuple(np.round(sigma, decimals=2).tolist())}"
         args = {"input": data, "sigma": sigma, "mode": mode, "cval": cval}
     elif type == "maximum":
         fun = ski_fil_ran.maximum
