@@ -1,10 +1,15 @@
 import logging
 import sys
 import numpy as np
-from czi import Czi
+from czi_file import Czi
+from nd2_file import Nd2
+from npy_file import Npy
 from colorama import Fore, Style
 
 # from channel import Channel
+
+# Drivers used to read microscopy files, selected by file extension
+DRIVERS = {".czi": Czi, ".nd2": Nd2, ".npy": Npy}
 
 
 class Image:
@@ -63,15 +68,17 @@ class Image:
 
         return logger
 
+    def _get_driver(self):
+        for ext, driver in DRIVERS.items():
+            if self.filename.lower().endswith(ext):
+                return driver
+        raise ValueError(
+            f"Unsupported file type: {self.filename}. Supported types: {', '.join(DRIVERS)}."
+        )
+
     def load_image(self):
-        if self.filename.endswith(".czi"):
-            with Czi(self.filename) as czi:
-                self.data = czi.get_data()
-        if self.filename.endswith(".npy"):
-            try:
-                self.data = np.load(self.filename)
-            except Exception:
-                raise ValueError("The file is not a valid .npy file.")
+        with self._get_driver()(self.filename) as reader:
+            self.data = reader.get_data()
 
         # Check the number of channels and if only 1, make it 4D
         if len(self.data.shape) == 3:
@@ -85,10 +92,8 @@ class Image:
             f"{Style.BRIGHT}{Fore.BLUE}############   Image data:   ############{Style.RESET_ALL}"
         )
         print(f"{Style.BRIGHT}Data ranges:{Style.RESET_ALL}")
-        for (c, n), r in zip(
-            [(k, v) for k, v in self.ch_dict.items() if isinstance(k, int)], contrast
-        ):
-            print(f"  {c}: {n:9} => {r}")
+        for c in range(self.data.shape[0]):
+            print(f"  {c}: {self.ch_dict[c]:9} => {contrast[c]}")
         if "fish" in self.ch_dict:
             print(f"{Style.BRIGHT}Fish channels:{Style.RESET_ALL}")
             print(f"  {self.ch_dict['fish']}")
@@ -107,36 +112,18 @@ class Image:
         #     )
 
     def _get_metadata(self):
-        if self.filename.endswith(".czi"):
-            with Czi(self.filename) as czi:
-                self.metadata = czi.get_metadata()
-                self.channels_meta = self.metadata["channels"]
-                self.channels_no = int(self.metadata["channels_no"])
-                # self.channels_no = len(self.channels_meta)
-                self.size = self.metadata["size_z_y_x"]
-                if self.resolution is None:
-                    self.scaling = self.metadata["scaling_z_y_x"]
-                else:
-                    self.scaling = self.resolution
-                self.scale_ratio = max(np.asarray(self.scaling) / min(self.scaling))
-                self.type_meta = self.metadata["image_type"]
-        if self.filename.endswith(".npy"):
-            self.metadata = {}
-            self.channels_meta = {}
-            img = np.load(self.filename, mmap_mode="r")
-            shape = img.shape
-            self.channels_no = shape[0] if len(shape) == 4 else 1
-            self.size = shape[1:] if len(shape) == 4 else shape
-            if self.resolution is None:
-                self.scaling = (
-                    1.0,
-                    1.0,
-                    1.0,
-                )
-            else:
-                self.scaling = self.resolution
-            self.scale_ratio = max(np.asarray(self.scaling) / min(self.scaling))
-            self.type_meta = {"type:": img.dtype}
+        with self._get_driver()(self.filename) as reader:
+            self.metadata = reader.get_metadata()
+        self.channels_meta = self.metadata["channels"]
+        self.channels_no = int(self.metadata["channels_no"])
+        # self.channels_no = len(self.channels_meta)
+        self.size = self.metadata["size_z_y_x"]
+        if self.resolution is None:
+            self.scaling = self.metadata["scaling_z_y_x"]
+        else:
+            self.scaling = self.resolution
+        self.scale_ratio = max(np.asarray(self.scaling) / min(self.scaling))
+        self.type_meta = self.metadata["image_type"]
 
     def _show_metadata(self):
         print(
@@ -209,8 +196,12 @@ class Image:
             ]
 
             for ch in self.ch_dict["fish"]:
-                self.ch_dict[ch] = (
-                    f"FISH_{int(float(self.channels_meta[ch]['Wavelength']))}"
-                )
+                # Name by wavelength when known (e.g. not available in .npy files)
+                if ch in self.channels_meta:
+                    self.ch_dict[ch] = (
+                        f"FISH_{int(float(self.channels_meta[ch]['Wavelength']))}"
+                    )
+                else:
+                    self.ch_dict[ch] = f"FISH_ch{ch}"
 
                 self.ch_dict["colormaps"][ch] = colors.pop(0)

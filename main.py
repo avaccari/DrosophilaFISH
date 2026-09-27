@@ -47,7 +47,7 @@ def analyze_image(
     show_version=False,
 ):
     # Set version
-    VERSION = "v1.2.0"
+    VERSION = "v1.3.0alpha"
 
     # If we are just showing the version
     if show_version:
@@ -63,10 +63,14 @@ def analyze_image(
     )
     if filename is None:
         filename = filedialog.askopenfilename(
-            filetypes=[("CZI files", "*.czi"), ("Numpy files", "*.npy")],
+            filetypes=[
+                ("CZI files", "*.czi"),
+                ("ND2 files", "*.nd2"),
+                ("Numpy files", "*.npy"),
+            ],
         )
         if filename == "":
-            raise ValueError("A .czi or .npy file should be provided for analysis.")
+            raise ValueError("A .czi, .nd2 or .npy file should be provided for analysis.")
 
     # Open image, and load and show metadata
     print(f"Loading file {Style.BRIGHT}{Fore.GREEN}{filename}{Style.RESET_ALL}")
@@ -703,12 +707,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--file",
-        help="CZI or NPY file to analyze. If not specified, the user will be asked to select a file.",
+        help="CZI, ND2 or NPY file to analyze. If not specified, the user will be asked to select a file.",
         default=None,
     )
     parser.add_argument(
         "--metadata_only",
-        help="Only retrieve and display the metadata of the CZI file. (Default: False)",
+        help="Only retrieve and display the metadata of the CZI or ND2 file. (Default: False)",
         default=False,
         action="store_true",
     )

@@ -11,6 +11,7 @@ dependencies:
   - xmltodict
   - scikit-image
   - czifile
+  - nd2
   - tifffile
   - napari
   - pyside6
